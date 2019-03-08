@@ -40,6 +40,14 @@ module Option = struct
   type 'a t = 'a option
 
   let some x = Some x
+
+  let map f = function
+    | Some x -> Some (f x)
+    | None -> None
+
+  let value ~default = function
+    | Some x -> x
+    | None -> default
 end
 
 type 'a tag = { name : string; pp: 'a Fmt.t; }
@@ -106,7 +114,7 @@ module Key = struct
   let h : field_name list Hmap.key = Hmap.Key.create { name= "field"; pp= Fmt.Dump.list Value.pp_field }
   let i : auid Hmap.key = Hmap.Key.create { name= "auid"; pp= Value.pp_auid }
   let l : int Hmap.key = Hmap.Key.create { name="length"; pp= Fmt.int }
-  let q : query Hmap.key = Hmap.Key.create { name= "query"; pp= Value.pp_query }
+  let q : query list Hmap.key = Hmap.Key.create { name= "query"; pp= Fmt.Dump.list Value.pp_query }
   let s : selector Hmap.key = Hmap.Key.create { name= "selector"; pp= Value.pp_selector }
   let t : int64 Hmap.key = Hmap.Key.create { name= "timestamp"; pp= Fmt.int64 }
   let x : int64 Hmap.key = Hmap.Key.create { name= "expiration"; pp= Fmt.int64 }
@@ -311,10 +319,12 @@ module Parser = struct
   let q =
     let tag_name = string "q" >>| fun _ -> Key.q in
     let tag_value =
-      (string "dns/txt" >>| fun _ -> `DNS_TXT)
-      <|> (hyphenated_word >>| fun x -> `Query_ext x)
-      >>= fun meth -> option None (char '/' *> qp_hdr_value >>| Option.some)
-      >>= fun args -> return (meth, args) in
+      let sig_q_tag_method =
+        (string "dns/txt" >>| fun _ -> `DNS_TXT)
+        <|> (hyphenated_word >>| fun x -> `Query_ext x)
+        >>= fun meth -> option None (char '/' *> qp_hdr_value >>| Option.some)
+        >>= fun args -> return (meth, args) in
+      sig_q_tag_method >>= fun x -> many (char ':' *> sig_q_tag_method) >>= fun r -> return (x :: r) in
     tag_spec ~tag_name ~tag_value >>| binding
 
   let s =
@@ -384,12 +394,6 @@ let parse_dkim x =
   | Ok v -> Ok v
   | Error _ -> Rresult.R.error_msgf "Invalid DKIM Signature: %S" x
 
-let pp_dkim ?sep =
-  let pp_binding ppf (Hmap.B (k, value)) =
-    let { Info.name; pp } = Hmap.Key.info k in
-    Fmt.pf ppf "%s => @[<hov>%a@]" name pp value in
-  Fmt.iter ?sep Hmap.iter pp_binding
-
 module type FLOW = sig
   type flow
 
@@ -420,28 +424,169 @@ let sanitize_input newline chunk len = match newline with
   | CRLF -> Bytes.sub_string chunk 0 len
   | LF -> sub_string_and_replace_newline chunk len
 
+let src = Logs.Src.create "dkim" ~doc:"logs dkim's event"
+module Log = (val Logs.src_log src : Logs.LOG)
+
+let field_dkim_signature = Mrmime.Field.of_string_exn "DKIM-Signature"
+
 let extract_dkim ?(newline = LF) (type flow) (flow : flow) (module Flow : FLOW with type flow = flow) =
   let open Mrmime in
   let chunk = 0x1000 in
   let raw = Bytes.create chunk in
   let buffer = Bigstringaf.create (2 * chunk) in
-  let decoder = St_header.decoder ~field:(Field.of_string_exn "DKIM-Signature") St_header.Value.Unstructured buffer in
-  let rec go () = match St_header.decode decoder with
+  let decoder = St_header.decoder ~field:field_dkim_signature St_header.Value.Unstructured buffer in
+  let rec go acc = match St_header.decode decoder with
     | `Field dkim_value ->
-      (match unfold dkim_value with
-       | Ok lst ->
-         let dkim_value = String.concat "" lst |> parse_dkim in
-         Fmt.epr "> %a.\n%!" Fmt.(result ~ok:(pp_dkim ~sep:(fun ppf () -> fmt ",@ " ppf)) ~error:Rresult.R.pp_msg) dkim_value
-       | Error (`Msg err) ->
-         Fmt.epr "Invalid DKIM value: %s.\n%!" err) ;
-      go ()
-    | `Other _ -> go ()
+      let acc = match unfold dkim_value with
+        | Error (`Msg err) ->
+          Log.warn (fun f -> f "Got an error when we unfold DKIM-Signature: %s" err) ;
+          acc
+        | Ok lst -> match parse_dkim (String.concat "" lst) with
+          | Ok dkim_value -> dkim_value :: acc
+          | Error (`Msg err) ->
+            Log.warn (fun f -> f "Got an error when we parse DKIM-Signature: %s" err) ;
+            acc in
+      go acc
+    | `Other _ -> go acc
     | `Malformed err -> Rresult.R.error_msg err
-    | `End -> Rresult.R.ok ()
+    | `End -> Rresult.R.ok (List.rev acc)
     | `Await ->
       let len = Flow.input flow raw 0 (Bytes.length raw) in
       let raw = sanitize_input newline raw len in
       match St_header.src decoder raw 0 (String.length raw) with
-      | Ok () -> go ()
+      | Ok () -> go acc
       | Error _ as err -> err in
+  go []
+
+type 'k dkim =
+  { v : int
+  ; a : Value.algorithm * hash
+  ; b : string
+  ; bh : value
+  ; c : Value.canonicalization * Value.canonicalization
+  ; d : Domain_name.t
+  ; h : Mrmime.Field.t list
+  ; i : Value.auid option
+  ; l : int option
+  ; q : Value.query list
+  ; s : Domain_name.t
+  ; t : int64 option
+  ; x : int64 option
+  ; z : (Mrmime.Field.t * string) list }
+and hash = V : 'k Digestif.hash -> hash
+and value = H : 'k Digestif.hash * 'k Digestif.t -> value
+
+let pp_hash ppf (V hash) = let open Digestif in match hash with
+  | MD5 -> Fmt.string ppf "MD5"
+  | SHA1 -> Fmt.string ppf "SHA1"
+  | RMD160 -> Fmt.string ppf "RMD160"
+  | SHA224 -> Fmt.string ppf "SHA224"
+  | SHA256 -> Fmt.string ppf "SHA256"
+  | SHA384 -> Fmt.string ppf "SHA384"
+  | SHA512 -> Fmt.string ppf "SHA512"
+  | WHIRLPOOL -> Fmt.string ppf "WHIRLPOOL"
+  | BLAKE2B _ -> Fmt.string ppf "BLAKE2B"
+  | BLAKE2S _ -> Fmt.string ppf "BLAKE2S"
+
+let pp_hex ppf x =
+  String.iter (fun x -> Fmt.pf ppf "%02x" (Char.code x)) x
+
+module Refl = struct type ('a, 'b) t = Refl : ('a, 'a) t end
+
+let equal_hash
+  : type a b. a Digestif.hash -> b Digestif.hash -> (a, b) Refl.t option
+  = fun a b -> let open Digestif in match a, b with
+    | MD5, MD5 -> Some Refl.Refl
+    | SHA1, SHA1 -> Some Refl.Refl
+    | RMD160, RMD160 -> Some Refl.Refl
+    | SHA224, SHA224 -> Some Refl.Refl
+    | SHA256, SHA256 -> Some Refl.Refl
+    | SHA384, SHA384 -> Some Refl.Refl
+    | SHA512, SHA512 -> Some Refl.Refl
+    | WHIRLPOOL, WHIRLPOOL -> Some Refl.Refl
+    | BLAKE2B x, BLAKE2B y -> if x = y then Some Refl.Refl else None
+    | BLAKE2S x, BLAKE2S y -> if x = y then Some Refl.Refl else None
+    | _, _ -> None
+
+let pp_signature (V hash) ppf (H (hash', value)) = match equal_hash hash hash' with
+  | Some Refl.Refl ->
+    Digestif.pp hash ppf value
+  | None -> assert false (* XXX(dinosaure): should never occur. *)
+
+let pp_dkim ppf t =
+  Fmt.pf ppf "{ @[<hov>v = %d;@ a = %a;@ b = %a;@ bh = %a; c = %a;@ d = %a;@ h = @[<hov>%a@];@ \
+                       i = @[<hov>%a@];@ l = %a;@ q = @[<hov>%a@];@ s = %a;@ t = %a;@ x = %a;@ \
+                       z = @[<hov>%a@];@] }"
+    t.v Fmt.(Dump.pair Value.pp_algorithm pp_hash) t.a
+    pp_hex t.b (pp_signature (snd t.a)) t.bh Fmt.(Dump.pair Value.pp_canonicalization Value.pp_canonicalization) t.c
+    Domain_name.pp t.d Fmt.(Dump.list Mrmime.Field.pp) t.h Fmt.(Dump.option Value.pp_auid) t.i Fmt.(Dump.option int) t.l
+    Fmt.(Dump.list Value.pp_query) t.q Domain_name.pp t.s Fmt.(Dump.option int64) t.t Fmt.(Dump.option int64) t.x
+    Fmt.(Dump.list Value.pp_copy) t.z
+
+let hash_ext = function
+  | hash -> Fmt.invalid_arg "Hash %s not found" hash (* TODO *)
+
+let string_of_quoted_printable x =
+  let decoder = Pecu.Inline.decoder (`String x) in
+  let res = Buffer.create 0x800 in
+  let rec go () = match Pecu.Inline.decode decoder with
+    | `Await -> assert false
+    | `Char chr -> Buffer.add_char res chr ; go ()
+    | `End -> Rresult.R.ok (Buffer.contents res)
+    | `Malformed err -> Rresult.R.error_msg err in
   go ()
+
+let post_process_dkim hmap =
+  let v = match Hmap.find Key.v hmap with
+    | Some v -> v
+    | None -> Fmt.invalid_arg "Version is required" in
+  let a = match Hmap.find Key.a hmap with
+    | Some (alg, Value.SHA1) -> (alg, V Digestif.SHA1)
+    | Some (alg, Value.SHA256) -> (alg, V Digestif.SHA256)
+    | Some (alg, Value.Hash_ext x) -> (alg, hash_ext x)
+    | None -> Fmt.invalid_arg "Algorithm is required" in
+  let b = match Option.map Base64.decode (Hmap.find Key.b hmap) with
+    | Some (Ok v) -> v
+    | Some (Error (`Msg err)) -> invalid_arg err
+    | None -> Fmt.invalid_arg "Signature data is required" in
+  let bh = match Option.map Base64.decode (Hmap.find Key.bh hmap) with
+    | Some (Error (`Msg err)) -> invalid_arg err
+    | None -> Fmt.invalid_arg "Hash of canonicalized body part is required"
+    | Some (Ok v) -> let (_, V k) = a in match Digestif.of_raw_string_opt k v with
+      | Some v -> H (k, v)
+      | None -> Fmt.invalid_arg "Invalid hash" in
+  let c = match Hmap.find Key.c hmap with
+    | Some v -> v
+    | None -> Value.Simple, Value.Simple in
+  let d = match Option.map (Domain_name.of_string <.> String.concat ".") (Hmap.find Key.d hmap) with
+    | Some (Ok v) -> v
+    | Some (Error (`Msg err)) -> invalid_arg err
+    | None -> Fmt.invalid_arg "SDID is required" in
+  let h = match Option.map (List.map Mrmime.Field.of_string_exn) (Hmap.find Key.h hmap) with
+    | Some v -> v (* XXX(dinosaure): [Parser.field_name] checks values. So, no post-process is required. *)
+    | None -> Fmt.invalid_arg "Signed header fields required" in
+  let i = Hmap.find Key.i hmap in
+  let l = Hmap.find Key.l hmap in
+  let q =
+    List.map (fun (q, x) -> match Option.map string_of_quoted_printable x with
+        | None -> (q, None)
+        | Some (Ok x) -> (q, Some x)
+        | Some (Error (`Msg err)) -> invalid_arg err)
+    (Option.value ~default:[] (Hmap.find Key.q hmap)) in
+  let s = match Option.map (Domain_name.of_string <.> String.concat ".") (Hmap.find Key.s hmap) with
+    | Some (Ok v) -> v
+    | Some (Error (`Msg err)) -> invalid_arg err
+    | None -> Fmt.invalid_arg "Selector is required" in
+  let t = Hmap.find Key.t hmap in
+  let x = Hmap.find Key.x hmap in
+  let z =
+    List.map
+      (fun (f, x) -> match string_of_quoted_printable x with
+         | Ok x -> (Mrmime.Field.of_string_exn f, x)
+         | Error (`Msg err) -> invalid_arg err)
+    (Option.(value ~default:[] (Hmap.find Key.z hmap))) in
+  { v; a; b; bh; c; d; h; i; l; q; s; t; x; z }
+
+let post_process_dkim hmap =
+  try Rresult.R.ok (post_process_dkim hmap)
+  with Invalid_argument err -> Rresult.R.error_msg err
