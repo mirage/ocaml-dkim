@@ -1,0 +1,3 @@
+(library
+ (name dkim)
+ (libraries mrmime digestif base64 domain-name hmap))
