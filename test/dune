@@ -1,0 +1,4 @@
+(executable
+ (name simple_body)
+ (modules simple_body)
+ (libraries digestif.c dkim alcotest))
