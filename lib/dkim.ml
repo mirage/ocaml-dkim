@@ -714,6 +714,8 @@ module Simple_body = struct
     ; mutable i_pos : int
     ; mutable i_len : int
     ; mutable has_cr : bool
+    ; b : Buffer.t (* XXX(dinosaure): we should replace it by something else
+                      where it can be an entry point for an attack. *)
     ; mutable k : decoder -> decode }
 
   let i_rem d = d.i_len - d.i_pos + 1
@@ -759,18 +761,30 @@ module Simple_body = struct
     let s = if decoder.has_cr then "\r" ^ s else s in
     let n = Bytes.sub_string decoder.i j (!idx - j) in
 
+    Buffer.add_string decoder.b n ;
     decoder.has_cr <- false ;
     decoder.i_pos <- !idx ;
 
     if String.length s = 0
-    then ret t_decode (`Spaces n) decoder
-    else ret (fun decoder -> ret t_decode (`Spaces n) decoder) (`Data s) decoder
+    then t_decode decoder
+    else ret (fun decoder ->
+        let s = Buffer.contents decoder.b in
+        (* XXX(dinosaure): in [t_spaces], we ensure that [decoder.b] as, at
+           least, one space. *)
+        Buffer.clear decoder.b ;
+        ret t_decode (`Spaces s) decoder)
+        (`Data s) decoder
+
+  and t_space_or k v decoder =
+    if Buffer.length decoder.b > 0
+    then ( let s = Buffer.contents decoder.b in Buffer.clear decoder.b ; ret (ret k v) (`Spaces s) decoder )
+    else ret k v decoder
 
   and t_decode decoder =
     let rem = i_rem decoder in
     if rem <= 0 then
       if rem < 0
-      then ( if decoder.has_cr then ret t_end (`Data "\r") decoder else ret t_end `End decoder )
+      then ( if decoder.has_cr then t_space_or t_end (`Data "\r") decoder else t_space_or t_end `End decoder )
       else `Await
     else match decoder.has_cr with
       | true ->
@@ -791,7 +805,7 @@ module Simple_body = struct
                  ; let s = Bytes.sub_string decoder.i j (!idx - j) in
                    let s = "\r" ^ s in
                    decoder.has_cr <- true
-                 ; ret t_decode (`Data s) decoder )
+                 ; t_space_or t_decode (`Data s) decoder )
             else if (!chr = ' ' || !chr = '\t')
             then t_space !idx decoder
             else ( let j = decoder.i_pos in
@@ -799,7 +813,7 @@ module Simple_body = struct
                  ; let s = Bytes.sub_string decoder.i j (!idx + 1 - j) in
                    let s = "\r" ^ s in
                    decoder.has_cr <- false
-                 ; ret t_decode (`Data s) decoder ) )
+                 ; t_space_or t_decode (`Data s) decoder ) )
       | false ->
         let idx = ref decoder.i_pos in
         let chr = ref '\000' in
@@ -814,14 +828,14 @@ module Simple_body = struct
                decoder.i_pos <- !idx + 1
              ; let s = Bytes.sub_string decoder.i j (!idx - j) in
                decoder.has_cr <- true
-             ; if s = "" then t_decode decoder else ret t_decode (`Data s) decoder )
+             ; if s = "" then t_decode decoder else t_space_or t_decode (`Data s) decoder )
         else if (!chr = ' ' || !chr = '\t')
         then t_space !idx decoder
         else ( let j = decoder.i_pos in
                decoder.i_pos <- !idx
              ; let s = Bytes.sub_string decoder.i j (!idx - j) in
                decoder.has_cr <- false
-             ; if s = "" then t_decode decoder else ret t_decode (`Data s) decoder )
+             ; if s = "" then t_decode decoder else ( Fmt.epr "t_space_or.\n%!" ; t_space_or t_decode (`Data s) decoder ) )
 
   let decode decoder = decoder.k decoder
 
@@ -830,6 +844,7 @@ module Simple_body = struct
     ; i_pos= 1
     ; i_len= 0
     ; has_cr= false
+    ; b= Buffer.create 16
     ; k= t_decode }
 end
 
