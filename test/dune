@@ -2,3 +2,8 @@
  (name simple_body)
  (modules simple_body)
  (libraries digestif.c dkim alcotest))
+
+(alias
+ (name runtest)
+ (deps (:simple_body simple_body.exe))
+ (action (run %{simple_body} --color=always)))
