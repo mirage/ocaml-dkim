@@ -1,14 +1,17 @@
+[@@@warning "-32-34-37"]
+
 type raw = Mrmime.Unstructured.t
 
 type noop = [ `WSP of string | `CR of int | `LF of int | `CRLF ]
 type data = [ `Text of string | `Encoded of Mrmime.Encoded_word.t ]
 
 let unfold =
-  let empty_rest = List.for_all (function `WSP _ | `CR _ | `LF _ | `CRLF -> true | `Text _ | `Encoded _ -> false) in
+  let empty_rest = List.for_all (function #noop -> true | #data -> false) in
   let has_semicolon = function
     | `Text x -> x.[String.length x - 1] = ';'
     | `Encoded { Mrmime.Encoded_word.data= Ok data; _ } -> data.[String.length data - 1] = ';'
-    | `Encoded { Mrmime.Encoded_word.data= Error err; _ } -> Fmt.invalid_arg "Cannot extract DKIM-Signature: %a" Rresult.R.pp_msg err in
+    | `Encoded { Mrmime.Encoded_word.data= Error err; _ } ->
+      Fmt.invalid_arg "Cannot extract DKIM-Signature: %a" Rresult.R.pp_msg err in
   let rec go tag acc rest = match rest, tag with
     | [], [] -> List.rev acc
     | [], tag -> List.rev (List.rev tag :: acc)
@@ -106,10 +109,12 @@ module Key = struct
   open Value
 
   let v : version Hmap.key = Hmap.Key.create { name= "version"; pp= Fmt.int }
-  let a : (algorithm * hash) Hmap.key = Hmap.Key.create { name= "algorithm"; pp= Fmt.Dump.pair Value.pp_algorithm Value.pp_hash }
+  let a : (algorithm * hash) Hmap.key = Hmap.Key.create
+      { name= "algorithm"; pp= Fmt.Dump.pair Value.pp_algorithm Value.pp_hash }
   let b : base64 Hmap.key = Hmap.Key.create { name= "signature"; pp= Fmt.string }
   let bh : base64 Hmap.key = Hmap.Key.create { name= "hash"; pp= Fmt.string }
-  let c : (canonicalization * canonicalization) Hmap.key = Hmap.Key.create { name= "canonicalization"; pp= Fmt.Dump.pair Value.pp_canonicalization Value.pp_canonicalization }
+  let c : (canonicalization * canonicalization) Hmap.key = Hmap.Key.create
+      { name= "canonicalization"; pp= Fmt.Dump.pair Value.pp_canonicalization Value.pp_canonicalization }
   let d : domain_name Hmap.key = Hmap.Key.create { name= "domain"; pp= Value.pp_domain_name }
   let h : field_name list Hmap.key = Hmap.Key.create { name= "field"; pp= Fmt.Dump.list Value.pp_field }
   let i : auid Hmap.key = Hmap.Key.create { name= "auid"; pp= Value.pp_auid }
@@ -137,7 +142,27 @@ module Parser = struct
   (* XXX(dinosaure): [is_equal] is necessary to take padding but a
      post-processing with [Base64] will check if we have a valid Base64 input. *)
 
-  (* XXX(dinosaure): [sub-domain] from [colombe]. *)
+  (* XXX(dinosaure): [field-name] from [mrmime]. See RFC 6376:
+
+     The following tokens are imported from [RFC5322]:
+     o  "field-name" (name of a header field)
+     o  "dot-atom-text" (in the local-part of an email address)
+  *)
+
+  let is_ftext = function
+    | '\033' .. '\057' | '\060' .. '\126' -> true
+    (* XXX(dinosaure): [is_ftext] should accept ';' but it not the case about
+       DKIM-Signature (which use this character as seperator). *)
+    | _ -> false
+
+  let field_name = take_while1 is_ftext
+
+  (* XXX(dinosaure): [local-part] and [sub-domain] from [colombe]. See RFC 6376:
+
+     The following tokens are imported from [RFC5321]:
+     o  "local-part" (implementation warning: this permits quoted strings)
+     o  "sub-domain"
+  *)
 
   let let_dig = satisfy (is_alpha or is_digit)
 
@@ -157,19 +182,6 @@ module Parser = struct
     sub_domain
     >>= fun x -> many (char '.' *> sub_domain)
     >>| fun r -> x :: r
-
-  (* XXX(dinosaure): [field-name] from [mrmime]. *)
-
-  let is_ftext = function
-    | '\033' .. '\057' | '\060' .. '\126' -> true
-    (* XXX(dinosaure): [is_ftext] should accept ';' but it not the case about
-       DKIM-Signature (which use this character as seperator). *)
-    | _ -> false
-
-  let field_name = take_while1 is_ftext
-  let hdr_name = field_name
-
-  (* XXX(dinosaure): [local-part] from [colombe]. *)
 
   let is_atext = function
     | 'a' .. 'z'
@@ -198,6 +210,10 @@ module Parser = struct
 
   let local_part = dot_string <|> quoted_string
 
+  (* See RFC 6376:
+
+     hyphenated-word =  ALPHA [ *(ALPHA / DIGIT / "-") (ALPHA / DIGIT) ]
+  *)
   let hyphenated_word = peek_char >>= function
     | None -> failf "Unexpected end of input"
     | Some chr -> match chr with
@@ -209,6 +225,12 @@ module Parser = struct
               else failf "Unexpected character %02x" (Char.code rest.[String.length rest - 1]))
         else return (String.make 1 chr)
       | chr -> failf "Unexpected character %02x" (Char.code chr)
+
+  (* See RFC 6376:
+
+     hdr-name        =  field-name
+  *)
+  let hdr_name = field_name
 
   let rsa = string "rsa" *> return Value.RSA
   let sha1 = string "sha1" *> return Value.SHA1
@@ -224,19 +246,13 @@ module Parser = struct
     take_while1 (is_digit or is_alpha)
     >>= fun h -> if not (is_digit h.[0]) then return (Value.Hash_ext h) else failf "Invalid hash: %s" h
 
-  let tag_spec
-    : type v. tag_name:v Hmap.key t -> tag_value:v t -> (v Hmap.key * v option) t
-    = fun ~tag_name ~tag_value ->
-    tag_name <* char '=' >>= fun name -> option None (tag_value >>| Option.some) >>= fun value -> return (name, value)
+  (* See RFC 6376
 
-  let is_alnumpunc = function
-    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
-    | _ -> false
-
-  let is_valchar = function
-    | '\x21' .. '\x3a' | '\x3c' .. '\x7e' -> true
-    | _ -> false
-
+     dkim-quoted-printable =  *(FWS / hex-octet / dkim-safe-char)
+                               ; hex-octet is from RFC2045
+     dkim-safe-char        =  %x21-3A / %x3C / %x3E-7E
+                               ; '!' - ':', '<', '>' - '~'
+  *)
   let dkim_quoted_printable =
     let is_hex = function '0' .. '9' | 'A' .. 'F' -> true | _ -> false in
     take_while (function '\x21' .. '\x3a' | '\x3c' | '\x3e' .. '\x7e' -> true | chr -> is_hex chr)
@@ -248,6 +264,26 @@ module Parser = struct
     >>= fun x -> many (char '.' *> sub_domain)
     >>| fun r -> x :: r
 
+  (* See RFC 6376
+
+     tag-list  =  tag-spec *( ";" tag-spec ) [ ";" ]
+     tag-spec  =  [FWS] tag-name [FWS] "=" [FWS] tag-value [FWS]
+     tag-name  =  ALPHA *ALNUMPUNC
+     tag-value =  [ tval *( 1*(WSP / FWS) tval ) ]
+                     ; Prohibits WSP and FWS at beginning and end
+     tval      =  1*VALCHAR
+     VALCHAR   =  %x21-3A / %x3C-7E
+                     ; EXCLAMATION to TILDE except SEMICOLON
+     ALNUMPUNC =  ALPHA / DIGIT / "_"
+  *)
+  let is_valchar = function
+    | '\x21' .. '\x3a' | '\x3c' .. '\x7e' -> true
+    | _ -> false
+
+  let is_alnumpunc = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
+    | _ -> false
+
   let tag_name = peek_char >>= function
     | None -> failf "Unexpected end of input"
     | Some chr -> match chr with
@@ -258,15 +294,29 @@ module Parser = struct
 
   let tag_value = take_while1 is_valchar
 
+  let tag_spec
+    : type v. tag_name:v Hmap.key t -> tag_value:v t -> (v Hmap.key * v option) t
+    = fun ~tag_name ~tag_value ->
+      tag_name <* char '=' >>= fun name -> option None (tag_value >>| Option.some) >>= fun value -> return (name, value)
+
   let binding = function
     | (k, Some v) -> Some (Hmap.B (k, v))
     | _ -> None
 
+  (* sig-v-tag       = %x76 [FWS] "=" [FWS] 1*DIGIT *)
   let v =
     let tag_name = string "v" >>| fun _ -> Key.v in
     let tag_value = take_while1 is_digit >>| int_of_string in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-a-tag       = %x61 [FWS] "=" [FWS] sig-a-tag-alg
+     sig-a-tag-alg   = sig-a-tag-k "-" sig-a-tag-h
+     sig-a-tag-k     = "rsa" / x-sig-a-tag-k
+     sig-a-tag-h     = "sha1" / "sha256" / x-sig-a-tag-h
+     x-sig-a-tag-k   = ALPHA *(ALPHA / DIGIT)
+                     ; for later extension
+     x-sig-a-tag-h   = ALPHA *(ALPHA / DIGIT)
+                     ; for later extension *)
   let a =
     let tag_name = string "a" >>| fun _ -> Key.a in
     let tag_value =
@@ -275,6 +325,8 @@ module Parser = struct
       >>| fun h -> (k, h) in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-b-tag       = %x62 [FWS] "=" [FWS] sig-b-tag-data
+     sig-b-tag-data  = base64string *)
   let b =
     (* XXX(dinosaure): base64string = ALPHADIGITPS *([FWS] ALPHADIGITPS) [ [FWS]
        "=" [ [FWS] "=" ] ]. Definition of the hell, a pre-processing is needed in
@@ -283,11 +335,17 @@ module Parser = struct
     let tag_value = take_while1 is_base64 in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-bh-tag      = %x62 %x68 [FWS] "=" [FWS] sig-bh-tag-data
+     sig-bh-tag-data = base64string *)
   let bh =
     let tag_name = string "bh" >>| fun _ -> Key.bh in
     let tag_value = take_while1 is_base64 in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-c-tag       = %x63 [FWS] "=" [FWS] sig-c-tag-alg
+                  ["/" sig-c-tag-alg]
+     sig-c-tag-alg   = "simple" / "relaxed" / x-sig-c-tag-alg
+     x-sig-c-tag-alg = hyphenated-word    ; for later extension *)
   let c =
     let tag_name = string "c" >>| fun _ -> Key.c in
     let tag_value =
@@ -295,27 +353,43 @@ module Parser = struct
       sig_c_tag_alg >>= fun h -> option Value.Simple (char '/' *> sig_c_tag_alg) >>= fun b -> return (h, b) in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-d-tag       = %x64 [FWS] "=" [FWS] domain-name
+     domain-name     = sub-domain 1*("." sub-domain)
+                  ; from [RFC5321] Domain,
+                  ; excluding address-literal *)
   let d =
     let tag_name = string "d" >>| fun _ -> Key.d in
     let tag_value = domain_name in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-h-tag       = %x68 [FWS] "=" [FWS] hdr-name
+                   *( [FWS] ":" [FWS] hdr-name ) *)
   let h =
     let tag_name = string "h" >>| fun _ -> Key.h in
     let tag_value = hdr_name >>= fun x -> many (char ':' *> hdr_name) >>= fun r -> return (x :: r) in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-i-tag       = %x69 [FWS] "=" [FWS] [ Local-part ]
+                           "@" domain-name *)
   let i =
     let tag_name = string "i" >>| fun _ -> Key.i in
     let tag_value = option None (local_part >>| Option.some) >>= fun local -> char '*' *> domain_name >>= fun domain ->
       return { Value.local; domain } in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-l-tag    = %x6c [FWS] "=" [FWS]
+                1*76DIGIT *)
   let l =
     let tag_name = string "l" >>| fun _ -> Key.l in
     let tag_value = take_while1 is_digit >>| int_of_string in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-q-tag        = %x71 [FWS] "=" [FWS] sig-q-tag-method
+                      *([FWS] ":" [FWS] sig-q-tag-method)
+      sig-q-tag-method = "dns/txt" / x-sig-q-tag-type
+                         ["/" x-sig-q-tag-args]
+      x-sig-q-tag-type = hyphenated-word  ; for future extension
+      x-sig-q-tag-args = qp-hdr-value *)
   let q =
     let tag_name = string "q" >>| fun _ -> Key.q in
     let tag_value =
@@ -327,21 +401,28 @@ module Parser = struct
       sig_q_tag_method >>= fun x -> many (char ':' *> sig_q_tag_method) >>= fun r -> return (x :: r) in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-s-tag    = %x73 [FWS] "=" [FWS] selector *)
   let s =
     let tag_name = string "s" >>| fun _ -> Key.s in
     let tag_value = selector in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-t-tag    = %x74 [FWS] "=" [FWS] 1*12DIGIT *)
   let t =
     let tag_name = string "t" >>| fun _ -> Key.t in
     let tag_value = take_while1 is_digit >>| Int64.of_string in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-x-tag    = %x78 [FWS] "=" [FWS]
+                              1*12DIGIT *)
   let x =
     let tag_name = string "x" >>| fun _ -> Key.x in
     let tag_value = take_while1 is_digit >>| Int64.of_string in
     tag_spec ~tag_name ~tag_value >>| binding
 
+  (* sig-z-tag      = %x7A [FWS] "=" [FWS] sig-z-tag-copy
+                 *( "|" [FWS] sig-z-tag-copy )
+     sig-z-tag-copy = hdr-name [FWS] ":" qp-hdr-value *)
   let z =
     let tag_name = string "z" >>| fun _ -> Key.z in
     let tag_value =
@@ -360,34 +441,6 @@ module Parser = struct
         (Hmap.singleton k v)
     | None -> failf "Expect at least one tag"
 end
-
-(*
-type base64 = private string
-type hash_value = private string
-type canonicalization = Simple | Relaxed | CExtension of string
-type query_method =
-  | DNS | TXT | QExtension of string
-
-type auid =
-  { local : Mrmime.Mailbox.local option
-  ; domain : Domain_name.t }
-
-type dkim_field =
-  { version : int
-  ; algorithm : algorithm * hash
-  ; signature : base64
-  ; hash_body_part : hash_value
-  ; canonicalization : canonicalization * canonicalization
-  ; sdid : Domain_name.t
-  ; signed_header_fields : Mrmime.Field.t list
-  ; auid : auid option
-  ; length : int option
-  ; query_methods : (query_method * query_method) list
-  ; selector : Domain_name.t
-  ; timestamp : int64 option
-  ; expiration : int64 option
-  ; copied_header_fields : (Mrmime.Field.t * Mrmime.Header.Value.t) list }
-*)
 
 let parse_dkim x =
   match Angstrom.parse_string Parser.tag_list x with
@@ -435,7 +488,7 @@ let extract_dkim ?(newline = LF) (type flow) (flow : flow) (module Flow : FLOW w
   let raw = Bytes.create chunk in
   let buffer = Bigstringaf.create (2 * chunk) in
   let decoder = St_header.decoder ~field:field_dkim_signature St_header.Value.Unstructured buffer in
-  let rec go acc = match St_header.decode decoder with
+  let rec go others acc = match St_header.decode decoder with
     | `Field dkim_value ->
       let acc = match unfold dkim_value with
         | Error (`Msg err) ->
@@ -446,19 +499,20 @@ let extract_dkim ?(newline = LF) (type flow) (flow : flow) (module Flow : FLOW w
           | Error (`Msg err) ->
             Log.warn (fun f -> f "Got an error when we parse DKIM-Signature: %s" err) ;
             acc in
-      go acc
-    | `Other _ -> go acc
+      go others acc
+    | `Other (field, raw) -> go ((field, raw) :: others) acc
+    | `Lines _ -> go others acc
     | `Malformed err -> Rresult.R.error_msg err
-    | `End -> Rresult.R.ok (List.rev acc)
+    | `End rest -> Rresult.R.ok (rest, List.rev others, List.rev acc)
     | `Await ->
       let len = Flow.input flow raw 0 (Bytes.length raw) in
       let raw = sanitize_input newline raw len in
       match St_header.src decoder raw 0 (String.length raw) with
-      | Ok () -> go acc
+      | Ok () -> go others acc
       | Error _ as err -> err in
-  go []
+  go [] []
 
-type 'k dkim =
+type dkim =
   { v : int
   ; a : Value.algorithm * hash
   ; b : string
@@ -475,6 +529,8 @@ type 'k dkim =
   ; z : (Mrmime.Field.t * string) list }
 and hash = V : 'k Digestif.hash -> hash
 and value = H : 'k Digestif.hash * 'k Digestif.t -> value
+
+let expected { bh; _ } = bh
 
 let pp_hash ppf (V hash) = let open Digestif in match hash with
   | MD5 -> Fmt.string ppf "MD5"
@@ -560,7 +616,10 @@ let post_process_dkim hmap =
     | None -> Value.Simple, Value.Simple in
   let d = match Option.map (Domain_name.of_string <.> String.concat ".") (Hmap.find Key.d hmap) with
     | Some (Ok v) -> v
-    | Some (Error (`Msg err)) -> invalid_arg err
+    | Some (Error (`Msg err)) ->
+      Fmt.invalid_arg "Retrieve an error with %a: %s"
+        Fmt.(Dump.option (Dump.list string)) (Hmap.find Key.d hmap)
+        err
     | None -> Fmt.invalid_arg "SDID is required" in
   let h = match Option.map (List.map Mrmime.Field.of_string_exn) (Hmap.find Key.h hmap) with
     | Some v -> v (* XXX(dinosaure): [Parser.field_name] checks values. So, no post-process is required. *)
@@ -573,9 +632,12 @@ let post_process_dkim hmap =
         | Some (Ok x) -> (q, Some x)
         | Some (Error (`Msg err)) -> invalid_arg err)
     (Option.value ~default:[] (Hmap.find Key.q hmap)) in
-  let s = match Option.map (Domain_name.of_string <.> String.concat ".") (Hmap.find Key.s hmap) with
+  let s = match Option.map (Domain_name.of_string ~hostname:false <.> String.concat ".") (Hmap.find Key.s hmap) with
     | Some (Ok v) -> v
-    | Some (Error (`Msg err)) -> invalid_arg err
+    | Some (Error (`Msg err)) ->
+      Fmt.invalid_arg "Retrieve an error with %a: %s"
+        Fmt.(Dump.option (Dump.list string)) (Hmap.find Key.s hmap)
+        err
     | None -> Fmt.invalid_arg "Selector is required" in
   let t = Hmap.find Key.t hmap in
   let x = Hmap.find Key.x hmap in
@@ -587,6 +649,284 @@ let post_process_dkim hmap =
     (Option.(value ~default:[] (Hmap.find Key.z hmap))) in
   { v; a; b; bh; c; d; h; i; l; q; s; t; x; z }
 
+let simple_field_canonicalization field f = f field
+
+let relaxed_field_canonicalization field f =
+  let parser =
+    let open Angstrom in
+    let open Mrmime.Rfc5322 in
+    field_name
+    <* many (satisfy (function '\x09' .. '\x20' -> true | _ -> false))
+    <* char ':'
+    >>= fun field_name -> unstructured
+    >>= fun value -> return (String.lowercase_ascii field_name, value) in
+  (* See RFC 6376:
+     Convert all header field names (not the header field values) to lowercase. *)
+  match Angstrom.parse_string parser field with
+  | Ok (field, unstructured) ->
+    let trim =
+      (* Delete all WSP characters at the end of each unfolded header field
+         value.
+
+         Delete any WSP characters remaining before and after the colon
+         separating the header field name form the header field value. The colon
+         separator MUST be retained. *)
+      let remove_wsp =
+        let discard = ref true in
+        List.fold_left (fun a -> function `WSP _ when !discard -> a | x -> discard := false ; x :: a) [] in
+      remove_wsp <.> remove_wsp in
+    f field ; f ":" ;
+    let unfold =
+      (* Order it seems important. *)
+      trim <.> List.rev <.> List.fold_left
+        (fun a x -> match a, x with
+           | `WSP _ :: _, `WSP _ -> a
+           (* Convert all sequences of one or more WSP characters to a single SP
+              character. WSP characters here include those before and after a
+              line folding boundary. *)
+           | a, x -> x :: a)
+        [] in
+    List.iter
+      (function
+        | `CRLF -> ()
+        | `CR n -> f (String.make n '\r')
+        | `LF n -> f (String.make n '\n')
+        | `Text x -> f x
+        | `Encoded { Mrmime.Encoded_word.data= Ok x; _ } -> f x
+        | `WSP _ -> f " "
+        (* Convert all sequences of one or more WSP characters to a single SP character.
+           WSP characters here include those before and after a line folding boundary. *)
+        | `Encoded { Mrmime.Encoded_word.data= Error (`Msg err); raw; _ } ->
+          Fmt.invalid_arg "%s with %S" err raw)
+      (unfold unstructured) ;
+    f "\r\n" (* Implementations MUST NOT remove the CRLF at the end of the
+                header field value. *)
+  | Error _ -> assert false
+    (* [Mrmime] already extracted [field] with, at least, [unstructured] parser.
+       In other side, we rely on that RFC said [unstructured] __is__ a super-set of
+       any other special values (like date). *)
+
+module Simple_body = struct
+  type decode = [ `Data of string | `Await | `End | `CRLF | `Spaces of string ]
+
+  type decoder =
+    { mutable i : bytes
+    ; mutable i_pos : int
+    ; mutable i_len : int
+    ; mutable has_cr : bool
+    ; mutable k : decoder -> decode }
+
+  let i_rem d = d.i_len - d.i_pos + 1
+
+  let end_of_input d =
+    d.i <- Bytes.empty ;
+    d.i_pos <- 0 ;
+    d.i_len <- min_int
+
+  let src decoder source off len =
+    if off < 0 || len < 0 || off + len > Bytes.length source
+    then Fmt.invalid_arg "Invalids bounds"
+    else if len = 0
+    then end_of_input decoder
+    else (
+      decoder.i <- source ;
+      decoder.i_pos <- off ;
+      decoder.i_len <- off + len - 1 )
+
+  let ret k v decoder =
+    decoder.k <- k ; v
+
+  let rec t_crlf k decoder =
+    ret k `CRLF decoder
+
+  and t_end decoder =
+    decoder.k <- t_end ; `End
+
+  and t_data s k decoder =
+    ret k (`Data s) decoder
+
+  and t_space j decoder =
+    let idx = ref j in
+    let chr = ref '\000' in
+
+    while decoder.i_len - !idx >= 0
+          && ( chr := Bytes.get decoder.i !idx
+             ; !chr = ' ' || !chr = '\t' )
+    do incr idx done ;
+
+    let i = decoder.i_pos in
+    let s = Bytes.sub_string decoder.i i (j - i) in
+    let s = if decoder.has_cr then "\r" ^ s else s in
+    let n = Bytes.sub_string decoder.i j (!idx - j) in
+
+    decoder.has_cr <- false ;
+    decoder.i_pos <- !idx ;
+
+    if String.length s = 0
+    then ret t_decode (`Spaces n) decoder
+    else ret (fun decoder -> ret t_decode (`Spaces n) decoder) (`Data s) decoder
+
+  and t_decode decoder =
+    let rem = i_rem decoder in
+    if rem <= 0 then
+      if rem < 0
+      then ( if decoder.has_cr then ret t_end (`Data "\r") decoder else ret t_end `End decoder )
+      else `Await
+    else match decoder.has_cr with
+      | true ->
+        if Bytes.get decoder.i decoder.i_pos = '\n'
+        then ( decoder.i_pos <- decoder.i_pos + 1 ; decoder.has_cr <- false ; `CRLF )
+        else
+          ( let idx = ref decoder.i_pos in
+            let chr = ref '\000' in
+
+            while decoder.i_len - !idx >= 0
+                  && ( chr := Bytes.get decoder.i !idx
+                     ; !chr <> '\r' && !chr <> ' ' && !chr <> '\t' )
+            do incr idx done ;
+
+            if !chr = '\r'
+            then ( let j = decoder.i_pos in
+                   decoder.i_pos <- !idx + 1
+                 ; let s = Bytes.sub_string decoder.i j (!idx - j) in
+                   let s = "\r" ^ s in
+                   decoder.has_cr <- true
+                 ; ret t_decode (`Data s) decoder )
+            else if (!chr = ' ' || !chr = '\t')
+            then t_space !idx decoder
+            else ( let j = decoder.i_pos in
+                   decoder.i_pos <- !idx + 1
+                 ; let s = Bytes.sub_string decoder.i j (!idx + 1 - j) in
+                   let s = "\r" ^ s in
+                   decoder.has_cr <- false
+                 ; ret t_decode (`Data s) decoder ) )
+      | false ->
+        let idx = ref decoder.i_pos in
+        let chr = ref '\000' in
+
+        while decoder.i_len - !idx >= 0
+              && ( chr := Bytes.get decoder.i !idx
+                 ; !chr <> '\r' && !chr <> ' ' && !chr <> '\t' )
+        do incr idx done ;
+
+        if !chr = '\r'
+        then ( let j = decoder.i_pos in
+               decoder.i_pos <- !idx + 1
+             ; let s = Bytes.sub_string decoder.i j (!idx - j) in
+               decoder.has_cr <- true
+             ; if s = "" then t_decode decoder else ret t_decode (`Data s) decoder )
+        else if (!chr = ' ' || !chr = '\t')
+        then t_space !idx decoder
+        else ( let j = decoder.i_pos in
+               decoder.i_pos <- !idx
+             ; let s = Bytes.sub_string decoder.i j (!idx - j) in
+               decoder.has_cr <- false
+             ; if s = "" then t_decode decoder else ret t_decode (`Data s) decoder )
+
+  let decode decoder = decoder.k decoder
+
+  let decoder () =
+    { i= Bytes.empty
+    ; i_pos= 1
+    ; i_len= 0
+    ; has_cr= false
+    ; k= t_decode }
+end
+
+let simple_body_canonicalization () =
+  (* RFC 6376 said:
+
+     The "simple" body canonicalization algorithm ignores all empty lines at the
+     end of the message body. An empty line is a line of zero length after
+     removal of the line line terminator. If there is no body or trailing CRLF
+     on the message body, a CRLF is added. It makes no other changes to the
+     message body. In more formal terms, the "simple" body canonicalization
+     algorithm converts "*CRLF" at the end of the body to a single "CRLF".
+
+     Note that a completely empty or missing body is canonicalized as a single
+     "CRLF"; that is, the canonicalized length will be 2 octets. *)
+  assert false
+
 let post_process_dkim hmap =
   try Rresult.R.ok (post_process_dkim hmap)
   with Invalid_argument err -> Rresult.R.error_msg err
+
+let digesti_of_hash (V hash) = fun f -> let v = Digestif.digesti_string hash f in H (hash, v)
+
+exception Find
+
+let list_assoc ~equal x l =
+  let res = ref None in
+  try List.iter (fun (y, v) -> if equal x y then ( res := Some v ; raise Find )) l ; raise Not_found
+  with Find -> match !res with
+    | Some v -> v | None -> assert false
+
+let list_remove_assoc ~equal x l =
+  let already_done = ref false in
+  List.fold_left
+    (fun a (y, v) ->
+       if equal x y && not !already_done
+       then ( already_done := true ; a)
+       else (y, v) :: a)
+    [] l |> List.rev
+
+let crlf digest n =
+  let rec go = function
+    | 0 -> ()
+    | n -> digest "\r\n" ; go (pred n) in
+  if n < 0 then Fmt.invalid_arg "Expect at least 0 <crlf>"
+  else go n
+
+let digest_body
+  : type flow. ?newline:newline -> flow -> (module FLOW with type flow = flow) -> (string * dkim) -> value
+  = fun ?(newline = LF) (type flow) (flow : flow) (module Flow : FLOW with type flow = flow) (prelude, dkim) ->
+  let relaxed = match snd dkim.c with
+    | Value.Simple -> false
+    | Value.Relaxed -> true
+    | Value.Canonicalization_ext _ -> assert false (* TODO *) in
+  let decoder = Simple_body.decoder () in
+  let chunk = 0x1000 in
+  let raw = Bytes.create chunk in
+  let q = Queue.create () in
+  let f = fun x -> Queue.push x q in
+  Bytes.blit_string prelude 0 raw 0 (String.length prelude) ;
+  (* XXX(dinosaure): [prelude] comes from [extract_dkim] and should be [<= 0x1000]. *)
+  let digest_stack f l =
+    let rec go = function
+      | [] -> ()
+      | [ `Spaces x ] -> f (if relaxed then " " else x)
+      | `CRLF :: r -> f "\r\n" ; go r
+      | `Spaces x :: r -> if not relaxed then f x ; go r in
+    go (List.rev l) in
+  let rec go stack = match Simple_body.decode decoder with
+    | `Await ->
+      let len = Flow.input flow raw 0 (Bytes.length raw) in
+      let raw = sanitize_input newline raw len in
+      Simple_body.src decoder (Bytes.unsafe_of_string raw) 0 (String.length raw) ;
+      go stack
+    | `End -> crlf f 1 ; () (* TODO: relaxed <> simple at the end.*)
+    | `Spaces _ as x -> go (x :: stack)
+    | `CRLF -> go (`CRLF :: stack)
+    | `Data x ->
+      digest_stack f stack ;
+      f x ; go [] in
+  Simple_body.src decoder raw 0 (String.length prelude) ; go [] ;
+  let digesti = digesti_of_hash (snd dkim.a) in
+  digesti (fun f -> Queue.iter f q)
+
+let digest_fields
+  : (Mrmime.Field.t * String.t) list -> dkim -> value
+  = fun others dkim ->
+  let digesti = digesti_of_hash (snd dkim.a) in
+  let canonicalization = match fst dkim.c with
+    | Value.Simple -> simple_field_canonicalization
+    | Value.Relaxed -> relaxed_field_canonicalization
+    | Value.Canonicalization_ext x -> Fmt.invalid_arg "%s canonicalisation is not supported" x in
+  let q = Queue.create () in
+  List.iter
+    (fun requested ->
+       try let raw = list_assoc ~equal:Mrmime.Field.equal requested others in
+         canonicalization raw (fun x -> Queue.push x q)
+       with Not_found -> Fmt.invalid_arg "Field %a not found" Mrmime.Field.pp requested)
+    dkim.h ;
+  digesti (fun f -> Queue.iter f q)
