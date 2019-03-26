@@ -43,7 +43,12 @@ val post_process_dkim : Hmap.t -> (dkim, [ `Msg of string ]) result
 
 val digest_fields : (Mrmime.Field.t * String.t) list -> dkim -> value
 
+type iter = string Digestif.iter
+type body = { relaxed : iter; simple : iter; }
+
 val digest_body :
   ?newline:newline -> 'a ->
   (module FLOW with type flow = 'a) ->
-  (string * dkim) -> value
+  string -> body
+
+val body_hash_of_dkim : body -> dkim -> value

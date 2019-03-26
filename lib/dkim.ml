@@ -775,6 +775,11 @@ module Simple_body = struct
         ret t_decode (`Spaces s) decoder)
         (`Data s) decoder
 
+  and t_space_data_space j decoder =
+    if Buffer.length decoder.b > 0 && (j - decoder.i_pos) > 0 && not decoder.has_cr
+    then ( let s = Buffer.contents decoder.b in Buffer.clear decoder.b ; ret (t_space j) (`Spaces s) decoder )
+    else t_space j decoder
+
   and t_space_or k v decoder =
     if Buffer.length decoder.b > 0
     then ( let s = Buffer.contents decoder.b in Buffer.clear decoder.b ; ret (ret k v) (`Spaces s) decoder )
@@ -789,7 +794,7 @@ module Simple_body = struct
     else match decoder.has_cr with
       | true ->
         if Bytes.get decoder.i decoder.i_pos = '\n'
-        then ( decoder.i_pos <- decoder.i_pos + 1 ; decoder.has_cr <- false ; `CRLF )
+        then ( decoder.i_pos <- decoder.i_pos + 1 ; decoder.has_cr <- false ; t_space_or t_decode `CRLF decoder )
         else
           ( let idx = ref decoder.i_pos in
             let chr = ref '\000' in
@@ -807,7 +812,7 @@ module Simple_body = struct
                    decoder.has_cr <- true
                  ; t_space_or t_decode (`Data s) decoder )
             else if (!chr = ' ' || !chr = '\t')
-            then t_space !idx decoder
+            then t_space_data_space !idx decoder
             else ( let j = decoder.i_pos in
                    decoder.i_pos <- !idx + 1
                  ; let s = Bytes.sub_string decoder.i j (!idx + 1 - j) in
@@ -830,12 +835,12 @@ module Simple_body = struct
                decoder.has_cr <- true
              ; if s = "" then t_decode decoder else t_space_or t_decode (`Data s) decoder )
         else if (!chr = ' ' || !chr = '\t')
-        then t_space !idx decoder
+        then t_space_data_space !idx decoder
         else ( let j = decoder.i_pos in
                decoder.i_pos <- !idx
              ; let s = Bytes.sub_string decoder.i j (!idx - j) in
                decoder.has_cr <- false
-             ; if s = "" then t_decode decoder else ( Fmt.epr "t_space_or.\n%!" ; t_space_or t_decode (`Data s) decoder ) )
+             ; if s = "" then t_decode decoder else ( t_space_or t_decode (`Data s) decoder ) )
 
   let decode decoder = decoder.k decoder
 
@@ -892,21 +897,25 @@ let crlf digest n =
   if n < 0 then Fmt.invalid_arg "Expect at least 0 <crlf>"
   else go n
 
+type iter = string Digestif.iter
+type body = { relaxed : iter
+            ; simple : iter }
+
+let buf = Buffer.create 16
+
 let digest_body
-  : type flow. ?newline:newline -> flow -> (module FLOW with type flow = flow) -> (string * dkim) -> value
-  = fun ?(newline = LF) (type flow) (flow : flow) (module Flow : FLOW with type flow = flow) (prelude, dkim) ->
-  let relaxed = match snd dkim.c with
-    | Value.Simple -> false
-    | Value.Relaxed -> true
-    | Value.Canonicalization_ext _ -> assert false (* TODO *) in
+  : type flow. ?newline:newline -> flow -> (module FLOW with type flow = flow) -> string -> body
+  = fun ?(newline = LF) (type flow) (flow : flow) (module Flow : FLOW with type flow = flow) prelude ->
   let decoder = Simple_body.decoder () in
   let chunk = 0x1000 in
   let raw = Bytes.create chunk in
-  let q = Queue.create () in
-  let f = fun x -> Queue.push x q in
+  let qr = Queue.create () in
+  let qs = Queue.create () in
+  let fr = fun x -> Queue.push x qr in
+  let fs = fun x -> Queue.push x qs in
   Bytes.blit_string prelude 0 raw 0 (String.length prelude) ;
   (* XXX(dinosaure): [prelude] comes from [extract_dkim] and should be [<= 0x1000]. *)
-  let digest_stack f l =
+  let digest_stack ?(relaxed= false) f l =
     let rec go = function
       | [] -> ()
       | [ `Spaces x ] -> f (if relaxed then " " else x)
@@ -917,17 +926,25 @@ let digest_body
     | `Await ->
       let len = Flow.input flow raw 0 (Bytes.length raw) in
       let raw = sanitize_input newline raw len in
-      Simple_body.src decoder (Bytes.unsafe_of_string raw) 0 (String.length raw) ;
+      Simple_body.src decoder (Bytes.of_string raw) 0 (String.length raw) ;
       go stack
-    | `End -> crlf f 1 ; () (* TODO: relaxed <> simple at the end.*)
+    | `End -> crlf fr 1 ; crlf fs 1 ; () (* TODO: relaxed <> simple at the end.*)
     | `Spaces _ as x -> go (x :: stack)
     | `CRLF -> go (`CRLF :: stack)
     | `Data x ->
-      digest_stack f stack ;
-      f x ; go [] in
+      digest_stack ~relaxed:true fr stack ; fr x ;
+      digest_stack fs stack ; fs x ;
+      go [] in
   Simple_body.src decoder raw 0 (String.length prelude) ; go [] ;
+  { relaxed= (fun f -> Queue.iter f qr)
+  ; simple= (fun f -> Queue.iter f qs) }
+
+let body_hash_of_dkim body dkim =
   let digesti = digesti_of_hash (snd dkim.a) in
-  digesti (fun f -> Queue.iter f q)
+  match snd dkim.c with
+  | Value.Simple -> digesti body.simple
+  | Value.Relaxed -> digesti body.relaxed
+  | Value.Canonicalization_ext x -> Fmt.invalid_arg "%s canonicalisation is not supported" x
 
 let digest_fields
   : (Mrmime.Field.t * String.t) list -> dkim -> value

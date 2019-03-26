@@ -99,6 +99,8 @@ let test_s11 = Alcotest.test_case "foo  " `Quick @@
   fun () -> Alcotest.(check output) "[]" (of_string "foo  ") [ `Data "foo"; `Spaces "  " ]
 let test_s12 = Alcotest.test_case "  foo" `Quick @@
   fun () -> Alcotest.(check output) "[]" (of_string "  foo") [ `Spaces "  "; `Data "foo" ]
+let test_s13 = Alcotest.test_case "<tab><tab><crlf><tab><tab>foo<crlf>" `Quick @@
+  fun () -> Alcotest.(check output) "[]" (of_string "\t\t\r\n\t\tfoo\r\n") [ `Spaces "\t\t"; `CRLF; `Spaces "\t\t"; `Data "foo"; `CRLF ]
 
 let test_l0 = Alcotest.test_case "empty" `Quick @@
   fun () -> Alcotest.(check output) "[]" (of_string_list []) []
@@ -116,6 +118,8 @@ let test_l6 = Alcotest.test_case "foo|<cr|lf>" `Quick @@
   fun () -> Alcotest.(check output) "[]" (of_string_list [ "foo"; "\r"; "\n" ]) [ `Data "foo"; `CRLF ]
 let test_l7 = Alcotest.test_case " | " `Quick @@
   fun () -> Alcotest.(check output) "[]" (of_string_list [ " "; " " ]) [ `Spaces "  " ]
+let test_l8 = Alcotest.test_case " <crlf>| " `Quick @@
+  fun () -> Alcotest.(check output) "[]" (of_string_list [ " \r\n"; " " ]) [ `Spaces " "; `CRLF; `Spaces " "]
 
 
 
@@ -123,6 +127,6 @@ let () =
   Alcotest.run "dkim"
     [ "simple body canonicalization (string)",
       [ test_s0; test_s1; test_s2; test_s3; test_s4; test_s5; test_s6; test_s7; test_s8
-      ; test_s9; test_s10; test_s11; test_s12 ]
+      ; test_s9; test_s10; test_s11; test_s12; test_s13 ]
     ; "simple body canonicalization (string list)",
-      [ test_l0; test_l1; test_l2; test_l3; test_l4; test_l5; test_l6; test_l7 ] ]
+      [ test_l0; test_l1; test_l2; test_l3; test_l4; test_l5; test_l6; test_l7; test_l8 ] ]

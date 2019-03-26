@@ -16,15 +16,18 @@ let () =
            | Error (`Msg err) -> invalid_arg err)
         values in
     Fmt.pr "%a.\n%!" Fmt.(Dump.list Dkim.pp_dkim) values ;
-    let dkim = List.hd values in
-    let Dkim.H (k, h) = Dkim.digest_body stdin (module Caml_flow) (prelude, dkim) in
-    let Dkim.H (k', h') = Dkim.expected dkim in
-    match Dkim.equal_hash k k' with
-    | Some Dkim.Refl.Refl ->
-      if Digestif.equal k h h'
-      then Fmt.pr "Body is verified.\n%!"
-      else Fmt.pr "Body is alterated (expected: %a, provided: %a).\n%!"
+    let body = Dkim.digest_body stdin (module Caml_flow) prelude in
+    let produced_hashes = List.map (Dkim.body_hash_of_dkim body) values in
+    let expected_hashes = List.map Dkim.expected values in
+
+    List.iter2
+      (fun (Dkim.H (k, h)) (Dkim.H (k', h')) -> match Dkim.equal_hash k k' with
+         | Some Dkim.Refl.Refl ->
+           if Digestif.equal k h h'
+           then Fmt.pr "Body is verified.\n%!"
+           else Fmt.pr "Body is alterated (expected: %a, provided: %a).\n%!"
           (Digestif.pp k) h'
           (Digestif.pp k) h
-    | None -> assert false
+         | None -> assert false)
+      produced_hashes expected_hashes
 
