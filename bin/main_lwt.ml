@@ -23,11 +23,11 @@ module Lwt_flow = struct
   let input flow buf off len = LwtIO.inj (Lwt_io.read_into flow buf off len)
 end
 
+let ( <.> ) f g = fun x -> f (g x)
+
 let lwt_bind x f =
   let open Lwt.Infix in
-  LwtIO.inj (LwtIO.prj x >>= fun x -> LwtIO.prj (f x))
-
-let ( <.> ) f g = fun x -> f (g x)
+  LwtIO.inj (LwtIO.prj x >>= (LwtIO.prj <.> f))
 
 let lwt =
   { Dkim.Sigs.bind= lwt_bind
@@ -35,6 +35,7 @@ let lwt =
 
 let main () =
   let open Lwt.Infix in
+
   Dkim.extract_dkim Lwt_io.stdin lwt (module Lwt_flow) |> LwtIO.prj >>= function
   | Error (`Msg err) -> Fmt.epr "Retrieve an error: %s.\n%!" err ; Lwt.return ()
   | Ok (prelude, _, values) ->
