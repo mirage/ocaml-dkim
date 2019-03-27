@@ -1,3 +1,9 @@
 (executable
- (name main)
- (libraries udns-client unix digestif.c dkim))
+ (name main_unix)
+ (modules main_unix)
+ (libraries udns-client-unix digestif.c dkim))
+
+(executable
+ (name main_lwt)
+ (modules main_lwt)
+ (libraries udns-client-lwt digestif.c dkim))
