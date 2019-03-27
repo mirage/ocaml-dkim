@@ -1,6 +1,6 @@
 let () = Printexc.record_backtrace true
 
-module Stream = Dkim.Simple_body
+module Stream = Dkim.Body
 
 let of_string x =
   let decoder = Stream.decoder () in
