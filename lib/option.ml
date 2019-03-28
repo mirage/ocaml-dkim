@@ -9,3 +9,8 @@ let map f = function
 let value ~default = function
   | Some x -> x
   | None -> default
+
+let bind x f = match x with Some x -> f x | None -> None
+
+let (>>=) = bind
+let (>>|) x f = map f x

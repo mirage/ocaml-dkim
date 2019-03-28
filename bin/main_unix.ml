@@ -27,38 +27,40 @@ let unix =
   { Dkim.Sigs.bind= (fun x f -> f (UnixIO.prj x))
   ; return= UnixIO.inj }
 
+let list_map3 f a b c =
+  if List.length a <> List.length b && List.length b <> List.length c
+  then Fmt.invalid_arg "list_iter3" ;
+  let rec go a b c = match a, b, c with
+    | a :: ra, b :: rb, c :: rc -> f a b c :: go ra rb rc
+    | [], [], [] -> []
+    | _ -> assert false in
+  go a b c
+
 let () =
   match Dkim.extract_dkim stdin unix (module Caml_flow) |> UnixIO.prj with
   | Error (`Msg err) -> Fmt.epr "Retrieve an error: %s.\n%!" err
-  | Ok (prelude, _, values) ->
-    let values = List.map
-        (fun (value) -> match Dkim.post_process_dkim value with
+  | Ok extracted ->
+    let mvalues = List.map
+        (fun (_, _, value) -> match Dkim.post_process_dkim value with
            | Ok value -> value
            | Error (`Msg err) -> invalid_arg err)
-        values in
-    Fmt.pr "%a.\n%!" Fmt.(Dump.list Dkim.pp_dkim) values ;
-    let body = Dkim.digest_body stdin unix (module Caml_flow) prelude in
-    let body = UnixIO.prj body in
-    let produced_hashes = List.map (Dkim.body_hash_of_dkim body) values in
-    let expected_hashes = List.map Dkim.expected values in
+        extracted.Dkim.dkim_fields in
 
-    List.iter2
-      (fun (Dkim.H (k, h)) (Dkim.H (k', h')) -> match Dkim.equal_hash k k' with
-         | Some Dkim.Refl.Refl ->
-           if Digestif.equal k h h'
-           then Fmt.pr "Body is verified.\n%!"
-           else Fmt.pr "Body is alterated (expected: %a, provided: %a).\n%!"
-          (Digestif.pp k) h'
-          (Digestif.pp k) h
-         | None -> assert false)
-      produced_hashes expected_hashes ;
+    let body = Dkim.digest_body stdin unix (module Caml_flow) ~prelude:extracted.Dkim.prelude in
+    let body = UnixIO.prj body in
 
     let dns = Udns.create () in
 
-    let svalues = List.map (UnixIO.prj <.> Dkim.extract_server dns unix (module Udns)) values in
+    let svalues = List.map (UnixIO.prj <.> Dkim.extract_server dns unix (module Udns)) mvalues in
     let svalues = List.map
         (fun value -> let open Rresult.R in match value >>= Dkim.post_process_server with
            | Ok value -> value
            | Error (`Msg err) -> invalid_arg err)
         svalues in
-    Fmt.pr "%a.\n%!" Fmt.(Dump.list Dkim.pp_server) svalues
+
+    let ress =
+      list_map3 (fun (raw_field_dkim, raw_dkim, _) dkim server ->
+          Dkim.verify extracted.Dkim.fields (raw_field_dkim, raw_dkim) dkim server body)
+        extracted.dkim_fields mvalues svalues in
+
+    Fmt.pr "%a.\n%!" Fmt.(Dump.list bool) ress

@@ -20,6 +20,8 @@ let (<.>) f g = fun x -> f (g x)
 let pp_hex ppf x = String.iter (fun x -> Fmt.pf ppf "%02x" (Char.code x)) x
 
 let unfold =
+  (* TODO: not sure if it's necessary to dispatch on semicolon where it can
+     appear in a middle of a [`Text]/[`Encoded _]. Why I did this code? *)
   let empty_rest = List.for_all (function #noop -> true | #data -> false) in
   let has_semicolon = function
     | `Text x -> x.[String.length x - 1] = ';'
@@ -93,11 +95,16 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let field_dkim_signature = Mrmime.Field.of_string_exn "DKIM-Signature"
 
+type extracted =
+  { dkim_fields : (Mrmime.Field.t * raw * Map.t) list
+  ; fields : (Mrmime.Field.t * string) list
+  ; prelude : string }
+
 let extract_dkim
   : type flow backend.
     ?newline:newline -> flow -> backend state ->
     (module FLOW with type flow = flow and type backend = backend) ->
-    ((string * (Mrmime.Field.t * string) list * Map.t list) or_err, backend) io
+    (extracted or_err, backend) io
   = fun (type flow backend) ?(newline = LF) (flow:flow) (state:backend state)
         (module Flow : FLOW with type flow = flow and type backend = backend) ->
     let open Mrmime in
@@ -110,13 +117,13 @@ let extract_dkim
     let buffer = Bigstringaf.create (2 * chunk) in
     let decoder = St_header.decoder ~field:field_dkim_signature St_header.Value.Unstructured buffer in
     let rec go others acc = match St_header.decode decoder with
-      | `Field dkim_value ->
-        let acc = match unfold dkim_value with
+      | `Field (raw_dkim_field, raw_dkim_value) ->
+        let acc = match unfold raw_dkim_value with
           | Error (`Msg err) ->
             Log.warn (fun f -> f "Got an error when we unfold DKIM-Signature: %s" err) ;
             acc
           | Ok lst -> match parse_dkim_field_value (String.concat "" lst) with
-            | Ok dkim_value -> dkim_value :: acc
+            | Ok dkim_value -> (raw_dkim_field, raw_dkim_value, dkim_value) :: acc
             | Error (`Msg err) ->
               Log.warn (fun f -> f "Got an error when we parse DKIM-Signature: %s" err) ;
               acc in
@@ -124,7 +131,7 @@ let extract_dkim
       | `Other (field, raw) -> go ((field, raw) :: others) acc
       | `Lines _ -> go others acc
       | `Malformed err -> return (Rresult.R.error_msg err)
-      | `End rest -> return (Rresult.R.ok (rest, List.rev others, List.rev acc))
+      | `End rest -> return (Rresult.R.ok { prelude= rest; fields= List.rev others; dkim_fields= List.rev acc; })
       | `Await ->
         Flow.input flow raw 0 (Bytes.length raw) >>= fun len ->
         let raw = sanitize_input newline raw len in
@@ -230,6 +237,17 @@ let string_of_quoted_printable x =
     | `Malformed err -> Rresult.R.error_msg err in
   go ()
 
+module SSet = Set.Make(Mrmime.Field)
+
+let uniqify l =
+  let r, _ =
+    List.fold_left (fun (r, s) x ->
+        if SSet.exists (Mrmime.Field.equal x) s
+        then r, s
+        else x :: r, SSet.add x s)
+      ([], SSet.empty) l in
+  List.rev r
+
 let post_process_dkim hmap =
   let v = match Map.find Map.K.v hmap with
     | Some v -> v
@@ -257,8 +275,13 @@ let post_process_dkim hmap =
         Fmt.(Dump.option (Dump.list string)) (Map.find Map.K.d hmap)
         err
     | None -> Fmt.invalid_arg "SDID is required" in
-  let h = match Option.map (List.map Mrmime.Field.of_string_exn) (Map.find Map.K.h hmap) with
-    | Some v -> v (* XXX(dinosaure): [Parser.field_name] checks values. So, no post-process is required. *)
+  let h = match Map.find Map.K.h hmap with
+    | Some v -> uniqify v
+    (* XXX(dinosaure):
+       - [Parser.field_name] checks values. So, no post-process is required.
+       - uniqify [h],however, I'm clearly not sure about that but [From] can
+       appear multiple times and need to be digest only one time. RFC 6376 does
+       not explain this behavior (tips from dkimpy). *)
     | None -> Fmt.invalid_arg "Signed header fields required" in
   let i = Map.find Map.K.i hmap in
   let l = Map.find Map.K.l hmap in
@@ -276,7 +299,7 @@ let post_process_dkim hmap =
   let z =
     List.map
       (fun (f, x) -> match string_of_quoted_printable x with
-         | Ok x -> (Mrmime.Field.of_string_exn f, x)
+         | Ok x -> (f, x)
          | Error (`Msg err) -> invalid_arg err)
     (Option.(value ~default:[] (Map.find Map.K.z hmap))) in
   { v; a; b; bh; c; d; h; i; l; q; s; t; x; z }
@@ -287,7 +310,8 @@ let post_process_dkim hmap =
 
 let post_process_server hmap =
   let v = Option.value ~default:"DKIM1" (Map.find Map.K.sv hmap) in
-  let h = Option.value ~default:[ V Digestif.SHA1; V Digestif.SHA256 ] (Option.map (List.map hash) (Map.find Map.K.sh hmap)) in
+  let h = Option.value ~default:[ V Digestif.SHA1; V Digestif.SHA256 ]
+      (Option.map (List.map hash) (Map.find Map.K.sh hmap)) in
   let k = Option.value ~default:Value.RSA (Map.find Map.K.k hmap) in
   let n = Map.find Map.K.n hmap in
   let p = match Option.map Base64.decode (Map.find Map.K.p hmap) with
@@ -308,7 +332,8 @@ exception Find
 
 let list_assoc ~equal x l =
   let res = ref None in
-  try List.iter (fun (y, v) -> if equal x y then ( res := Some v ; raise Find )) l ; raise Not_found
+  try List.iter (fun (y, v) -> if equal x y then ( res := Some (y, v) ; raise Find )) l
+    ; raise Not_found
   with Find -> match !res with
     | Some v -> v | None -> assert false
 
@@ -321,14 +346,55 @@ let list_remove_assoc ~equal x l =
        else (y, v) :: a)
     [] l |> List.rev
 
-let list_first predicate vss =
+let list_first predicate vs =
   let res = ref None in
-  try List.iter (List.iter (fun x -> if predicate x then ( res := Some x ; raise Find ))) vss ; None
+  try List.iter (fun x -> if predicate x then ( res := Some x ; raise Find )) vs
+    ; None
   with Find -> !res
 
-let simple_field_canonicalization field f = f field
+let string_contains ?(off= 0) str chr =
+  let res = ref None in
+  let len = String.length str - off in
+  try String.iteri (fun i x -> if x = chr then ( res := Some i ; raise Find )) (String.sub str off len) ; None
+  with Find -> match !res with Some pos -> Some (off + pos) | None -> None
 
-let relaxed_field_canonicalization field f =
+let simple_field_canonicalization raw_field_and_value f =
+  (* TODO: delete trailing CRLF. *)
+  f raw_field_and_value
+
+let simple_dkim_field_canonicalization (dkim_field:Mrmime.Field.t) raw f =
+  let raw =
+    let remove_crlf =
+      let discard = ref true in
+      List.fold_left (fun a -> function `CRLF when !discard -> a | x -> discard := false ; x :: a) [] in
+    remove_crlf (List.rev raw) in
+
+  f (dkim_field :> string) ;
+  f ":" ;
+
+  List.iter
+    (function
+      | `CRLF -> f "\r\n"
+      | `CR n -> f (String.make n '\r')
+      | `LF n -> f (String.make n '\n')
+      | `Text x -> f x
+      | `Encoded t -> f (Mrmime.Encoded_word.reconstruct t)
+      | `WSP x -> f x)
+    raw
+
+let unstructured_to_string l =
+  let res = Buffer.create 16 in
+  List.iter (function
+      | `CRLF -> ()
+      | `CR n -> Buffer.add_string res (String.make n '\r')
+      | `LF n -> Buffer.add_string res (String.make n '\n')
+      | `Text x -> Buffer.add_string res x
+      | `Encoded t -> Buffer.add_string res (Mrmime.Encoded_word.reconstruct t)
+      | `WSP _ -> Buffer.add_string res " ")
+    l ;
+  Buffer.contents res
+
+let relaxed_field_canonicalization raw_field_and_value f =
   let parser =
     let open Angstrom in
     let open Mrmime.Rfc5322 in
@@ -339,7 +405,7 @@ let relaxed_field_canonicalization field f =
     >>= fun value -> return (String.lowercase_ascii field_name, value) in
   (* See RFC 6376:
      Convert all header field names (not the header field values) to lowercase. *)
-  match Angstrom.parse_string parser field with
+  match Angstrom.parse_string parser raw_field_and_value with
   | Ok (field, unstructured) ->
     let trim =
       (* Delete all WSP characters at the end of each unfolded header field
@@ -355,33 +421,61 @@ let relaxed_field_canonicalization field f =
     f field ; f ":" ;
     let unfold =
       (* Order it seems important. *)
-      trim <.> List.rev <.> List.fold_left
-        (fun a x -> match a, x with
-           | `WSP _ :: _, `WSP _ -> a
-           (* Convert all sequences of one or more WSP characters to a single SP
-              character. WSP characters here include those before and after a
-              line folding boundary. *)
-           | a, x -> x :: a)
-        [] in
+      trim
+      <.> (List.fold_left
+             (fun a x -> match a, x with
+                | `WSP _ :: _, `WSP _ -> a
+                (* Convert all sequences of one or more WSP characters to a
+                   single SP character. WSP characters here include those before
+                   and after a line folding boundary. *)
+                | a, x -> x :: a)
+             [])
+      <.> (List.fold_left (fun a -> function `CRLF -> a | x -> x :: a) []) in
+    let unstructured = unfold unstructured in
     List.iter
       (function
         | `CRLF -> ()
         | `CR n -> f (String.make n '\r')
         | `LF n -> f (String.make n '\n')
         | `Text x -> f x
-        | `Encoded { Mrmime.Encoded_word.data= Ok x; _ } -> f x
-        | `WSP _ -> f " "
-        (* Convert all sequences of one or more WSP characters to a single SP character.
-           WSP characters here include those before and after a line folding boundary. *)
-        | `Encoded { Mrmime.Encoded_word.data= Error (`Msg err); raw; _ } ->
-          Fmt.invalid_arg "%s with %S" err raw)
-      (unfold unstructured) ;
+        | `Encoded t -> f (Mrmime.Encoded_word.reconstruct t)
+        | `WSP _ -> f " ")
+      unstructured ;
     f "\r\n" (* Implementations MUST NOT remove the CRLF at the end of the
                 header field value. *)
   | Error _ -> assert false
     (* [Mrmime] already extracted [field] with, at least, [unstructured] parser.
        In other side, we rely on that RFC said [unstructured] __is__ a super-set of
        any other special values (like date). *)
+
+let relaxed_dkim_field_canonicalization (dkim_field:Mrmime.Field.t) raw f =
+  (* XXX(dinosaure): duplicate with [relaxed_field_canonicalization] without
+     ["DKIM-Signature"] and trailing [CRLF]. TODO! *)
+  let trim =
+    let remove_wsp =
+      let discard = ref true in
+      List.fold_left (fun a -> function `WSP _ when !discard -> a | x -> discard := false ; x :: a) [] in
+    let remove_crlf =
+      let discard = ref true in
+      List.fold_left (fun a -> function `CRLF when !discard -> a | x -> discard := false ; x :: a) [] in
+    (remove_crlf <.> List.rev) <.> (remove_wsp <.> remove_wsp) in
+  let unfold =
+    trim <.> List.rev <.> List.fold_left
+      (fun a x -> match a, x with
+         | `WSP _ :: _, `WSP _ -> a
+         | a, x -> x :: a)
+      [] in
+  (* XXX(dinosaure): should be [f "dkim-signature:"]. *)
+  f (String.lowercase_ascii (dkim_field :> string)) ; f ":" ;
+  List.iter
+    (function
+      | `CRLF -> ()
+      | `CR n -> f (String.make n '\r')
+      | `LF n -> f (String.make n '\n')
+      | `Text x -> f x
+      | `WSP _ -> f " "
+      | `Encoded t -> f (Mrmime.Encoded_word.reconstruct t))
+    (unfold raw)
 
 let crlf digest n =
   let rec go = function
@@ -395,8 +489,15 @@ type body = { relaxed : iter
             ; simple : iter }
 
 let digest_body
-  : type flow backend. ?newline:newline -> flow -> backend state -> (module FLOW with type flow = flow and type backend = backend) -> string -> (body, backend) io
-  = fun ?(newline = LF) (type flow backend) (flow : flow) (state : backend state) (module Flow : FLOW with type flow = flow and type backend = backend) prelude ->
+  : type flow backend.
+    ?newline:newline ->
+    flow -> backend state ->
+    (module FLOW with type flow = flow and type backend = backend) ->
+    prelude:string -> (body, backend) io
+  = fun ?(newline = LF) (type flow backend)
+    (flow : flow) (state : backend state)
+    (module Flow : FLOW with type flow = flow and type backend = backend)
+    ~prelude ->
 
     let (>>=) = state.bind in
     let return = state.return in
@@ -436,6 +537,118 @@ let digest_body
     go [] >>= fun () -> return { relaxed= (fun f -> Queue.iter f qr)
                                ; simple= (fun f -> Queue.iter f qs) }
 
+(* XXX(dinosaure): seriously, going to hell DKIM! TODO: remove [sps]. From [dkimpy]:
+   re.compile(br[\s]b'+FWS+br'=) (?:'+FWS+br'[a-zA-Z0-9+/=])*(?:\r?\n\Z)?' this is does NOT MEAN ANYTHING BOY. *)
+
+let remove_signature_of_raw_dkim raw =
+  let contains ?off x chr = match x with
+    | `Text x -> string_contains ?off x chr
+    | `Encoded { Mrmime.Encoded_word.data= Ok data; _ } -> string_contains ?off data chr
+    | _ -> None in
+
+  let length = function
+    | `Text x -> String.length x
+    | `Encoded { Mrmime.Encoded_word.data= Ok x; _ } -> String.length x
+    | _ -> 0 in
+
+  let remove_while_semicolon ?(off= 0) x =
+    if off = length x then x, true
+    else match x with
+    | `Text x ->
+      let len = String.length x - off in
+      ( match string_contains (String.sub x off len) ';' with
+        | Some pos ->
+          let s = String.sub x 0 off ^ String.sub x (off + pos) (len - pos) in
+          `Text s, false
+        | None -> `Text (String.sub x 0 off), true )
+    | `Encoded ({ Mrmime.Encoded_word.data= Ok x; _ } as encoded) ->
+      let len = String.length x - off in
+      ( match string_contains (String.sub x off len) ';' with
+        | Some pos ->
+          let s = String.sub x 0 off ^ String.sub x (off + pos) (len - pos) in
+          `Encoded { encoded with Mrmime.Encoded_word.data= Ok s }, false
+        | None -> `Encoded { encoded with Mrmime.Encoded_word.data= Ok (String.sub x 0 off) }, true )
+    | _ -> `Text "", true in
+
+  let is_consecutive_3 a b c = a = b - 1 && b = c - 1 in
+  let is_consecutive_2 a b = a = b - 1 in
+
+  List.fold_left
+    (fun (state, sps, acc) x ->
+       let rec go state = match state, x with
+        | `_0, (#data as x) ->
+          ( match Option.(contains x ';'
+                          >>= fun a -> contains ~off:a x 'b'
+                          >>= fun b -> contains ~off:b x '='
+                          >>= fun c -> Some (a, b, c)),
+                  Option.(contains x ';'
+                          >>= fun a -> contains ~off:a x 'b'
+                          >>= fun b -> Some (a, b)),
+                  contains x ';' with
+            | Some (a, b, c), _, _ ->
+              if is_consecutive_3 a b c
+              then let x, continue = remove_while_semicolon ~off:(c + 1) x in
+                if continue then (`R, [], x :: sps @ acc) else (`S, [], x :: sps @ acc)
+              else if is_consecutive_2 a b && b = length x - 1
+              then `_2, [], x :: sps @ acc
+              else if a = length x - 1
+              then `_1, [], x :: sps @ acc
+              else `_0, [], x :: sps @ acc
+            | _, Some (a, b), _ ->
+              if is_consecutive_2 a b && b = length x - 1
+              then `_2, [], x :: sps @ acc
+              else if a = length x - 1
+              then `_1, [], x :: sps @ acc
+              else `_0, [], x :: sps @ acc
+            | _, _, Some a ->
+              if a = length x - 1
+              then `_1, [], x :: sps @ acc
+              else `_0, [], x :: sps @ acc
+            | _, _, _ -> `_0, [], x :: sps @ acc )
+        | `_1, (#data as x) ->
+          ( match Option.(contains x 'b' >>= fun b -> contains ~off:b x '=' >>= fun c -> Some (b, c)),
+                  contains x 'b' with
+            | Some (0, 1), _ ->
+              let x, continue = remove_while_semicolon ~off:2 x in
+              if continue
+              then (`R, [], x :: sps @ acc)
+              else (`S, [], x :: sps @ acc)
+            | _, Some 0 ->
+              if length x = 1 then `_2, [], x :: sps @ acc else go `_0
+            | _, _ -> go `_0 )
+        | `_1, (#noop as x) -> `_1, x :: sps, acc
+        | `_2, (#data as x) ->
+          ( match contains x '=' with
+            | Some 0 ->
+              let x, continue = remove_while_semicolon ~off:1 x in
+              if continue then (`R, [], x :: sps @ acc) else (`S, [], x :: sps @ acc)
+            | _ -> go `_0 )
+        | `_2, (#noop as x) -> `_2, x :: sps, acc
+        | `R, #noop -> `R, [], acc
+        | `R, (#data as x) ->
+          let x, continue = remove_while_semicolon x in
+          if continue then (`R, [], x :: acc) else (`S, [], x :: acc)
+        | ((`_0 | `S) as state), x -> state, [], x :: acc
+       in go state )
+    (`_0, [], []) (`Text ";" :: raw) (* XXX(dinosaure): if [b] starts at the beginning. *)
+  |> fun (state, sps, raw) -> match state, sps, List.rev raw with
+  | (`S | `R), [], (`Text ";" :: raw) ->
+    let raw = List.fold_left (fun a -> function
+        | `Text ""
+        | `Encoded { Mrmime.Encoded_word.data= Ok ""; _ } -> a
+        | x -> x :: a) [] raw in
+    List.rev raw
+  | state, sps, `Text ";" :: _ ->
+    let pp_state ppf = function
+      | `_0 -> Fmt.string ppf "<state:0>"
+      | `_1 -> Fmt.string ppf "<state:1>"
+      | `_2 -> Fmt.string ppf "<state:2>"
+      | `R -> Fmt.string ppf "<remove-state>"
+      | `S -> Fmt.string ppf "<stop-state>" in
+    Fmt.invalid_arg "Bad raw input (state:%a, sps:@[<hov>%a@])"
+      pp_state state (Fmt.brackets Mrmime.Unstructured.pp) sps
+  | _, _, _ -> assert false (* XXX(dinosaure): should never occur! *)
+
 let body_hash_of_dkim body dkim =
   let digesti = digesti_of_hash (snd dkim.a) in
   match snd dkim.c with
@@ -454,15 +667,23 @@ let digest_fields
   let q = Queue.create () in
   List.iter
     (fun requested ->
-       try let raw = list_assoc ~equal:Mrmime.Field.equal requested others in
+       try let field, raw = list_assoc ~equal:Mrmime.Field.equal requested others in
+         Queue.push (field :> string) q ;
+         Queue.push ":" q ;
          canonicalization raw (fun x -> Queue.push x q)
        with Not_found -> Fmt.invalid_arg "Field %a not found" Mrmime.Field.pp requested)
     dkim.h ;
   digesti (fun f -> Queue.iter f q)
 
 let extract_server
-  : type t backend. t -> backend state -> (module DNS with type t = t and type backend = backend) -> dkim -> (Map.t or_err, backend) io
-  = fun (type t backend) (t:t) (state:backend state) (module Dns : DNS with type t = t and type backend = backend) (dkim:dkim) ->
+  : type t backend.
+    t -> backend state ->
+    (module DNS with type t = t and type backend = backend) ->
+    dkim -> (Map.t or_err, backend) io
+  = fun (type t backend)
+    (t:t) (state:backend state)
+    (module Dns : DNS with type t = t and type backend = backend)
+    (dkim:dkim) ->
 
     let (>>=) = state.bind in
     let return = state.return in
@@ -474,12 +695,74 @@ let extract_server
     Dns.getaddrinfo t `TXT domain_name >>= function
     | Error _ as err -> return err
     | Ok vss ->
-      Fmt.epr "> %a.\n%!" Fmt.(Dump.list (Dump.list string)) vss ;
-      let vss = List.map (List.map parse_dkim_server_value) vss in
-      let pp_hmap ppf _ = Fmt.string ppf "#hmap" in
-      Fmt.epr "> %a.\n%!" Fmt.(Dump.list (Dump.list (Dump.result ~ok:pp_hmap ~error:Rresult.R.pp_msg))) vss ;
-      match list_first Rresult.R.is_ok vss with
+      let vs = List.map (String.concat "") vss in
+      (* XXX(dinosaure): RFC 6376 said: Strings in a TXT RR MUST be concatenated
+         together before use with no intervening whitespace. *)
+      let vs = List.map parse_dkim_server_value vs in
+      match list_first Rresult.R.is_ok vs with
       | None ->
         return (Rresult.R.error_msgf "%a does not contain any DKIM values" Domain_name.pp domain_name)
       | Some (Ok hmap) -> return (Ok hmap)
       | Some (Error _) -> assert false
+
+let data_hash_of_dkim fields ((field_dkim : Mrmime.Field.t), raw_dkim) dkim =
+  (* In hash step 2, the Signer/Verifiers MUST pass the following to the hash
+     algorithm in the indicated order. *)
+  let digesti = digesti_of_hash (snd dkim.a) in
+  let canonicalization = match fst dkim.c with
+    | Value.Simple -> simple_field_canonicalization
+    | Value.Relaxed -> relaxed_field_canonicalization
+    | Value.Canonicalization_ext x -> Fmt.invalid_arg "%s canonicalisation is not supported" x in
+  let dkim_field_canonicalization = match fst dkim.c with
+    | Value.Simple -> simple_dkim_field_canonicalization
+    | Value.Relaxed -> relaxed_dkim_field_canonicalization
+    | Value.Canonicalization_ext x -> Fmt.invalid_arg "%s canonicalisation is not supported" x in
+  let q = Queue.create () in
+  (* The header fields specified by the "h=" tag, in the order specified in that
+     tag, and canonicalized using the header canonicalization algorithm
+     specified in the "c=" tag. Each field MUST be terminated with a single
+     CRLF. *)
+  List.iter
+    (fun requested ->
+       try let _, raw = list_assoc ~equal:Mrmime.Field.equal requested fields in
+         canonicalization raw (fun x -> Queue.push x q)
+       with Not_found -> Fmt.invalid_arg "Field %a not found" Mrmime.Field.pp requested)
+    dkim.h ;
+  (* The DKIM-Signature header field that exists (verifying) or will be inserted
+     (signing) in the message, with the value of the "b=" tag (including all
+     surrounding whitespace) deleted (i.e., treated as the empty string),
+     canonicalized using the header canonicalization algorithm specified in the
+     "c=" tag, and without a trailing CRLF. *)
+  let raw_dkim = remove_signature_of_raw_dkim raw_dkim in
+  dkim_field_canonicalization field_dkim raw_dkim (fun x -> Queue.push x q) ;
+  digesti (fun f -> Queue.iter f q)
+
+let verify_body dkim body =
+  let H (k, v) = body_hash_of_dkim body dkim in
+  let H (k', v') = expected dkim in
+  match equal_hash k k' with
+  | Some Refl.Refl ->
+    Digestif.equal k v v'
+  | None -> false
+
+let verify fields (dkim_signature:Mrmime.Field.t * raw) dkim server body =
+  let _body_hash = body_hash_of_dkim body dkim in
+  let H (k, data_hash) = data_hash_of_dkim fields dkim_signature dkim in
+  (* DER-encoded X.509 RSAPublicKey. *)
+  match X509.Encoding.public_of_cstruct (Cstruct.of_string server.p) with
+  | Some (`RSA p) ->
+    let hash_predicate a = match a, k with
+      | `SHA1, Digestif.SHA1 -> true
+      | `SHA224, Digestif.SHA224 -> true
+      | `SHA256, Digestif.SHA256 -> true
+      | `SHA384, Digestif.SHA384 -> true
+      | `SHA512, Digestif.SHA512 -> true
+      | `MD5, Digestif.MD5 -> true
+      | _, _ -> false in
+    let data_hash = `Digest (Cstruct.of_string (Digestif.to_raw_string k data_hash)) in
+    let r0 = Nocrypto.Rsa.PKCS1.verify ~hashp:hash_predicate~key:p ~signature:(Cstruct.of_string dkim.b) data_hash in
+    let r1 = verify_body dkim body in
+
+    r0 && r1
+  | Some (`EC_pub _) -> Fmt.invalid_arg "We did not handle EC public-key yet!"
+  | None -> false

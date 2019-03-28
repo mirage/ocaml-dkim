@@ -33,41 +33,45 @@ let lwt =
   { Dkim.Sigs.bind= lwt_bind
   ; return= (fun x -> LwtIO.inj (Lwt.return x)) }
 
+let list_map3 f a b c =
+  if List.length a <> List.length b && List.length b <> List.length c
+  then Fmt.invalid_arg "list_iter3" ;
+  let rec go a b c = match a, b, c with
+    | a :: ra, b :: rb, c :: rc -> f a b c :: go ra rb rc
+    | [], [], [] -> []
+    | _ -> assert false in
+  go a b c
+
 let main () =
   let open Lwt.Infix in
 
   Dkim.extract_dkim Lwt_io.stdin lwt (module Lwt_flow) |> LwtIO.prj >>= function
   | Error (`Msg err) -> Fmt.epr "Retrieve an error: %s.\n%!" err ; Lwt.return ()
-  | Ok (prelude, _, values) ->
-    let values = List.map
-        (fun (value) -> match Dkim.post_process_dkim value with
+  | Ok extracted ->
+    let mvalues = List.map
+        (fun (_, _, value) -> match Dkim.post_process_dkim value with
            | Ok value -> value
            | Error (`Msg err) -> invalid_arg err)
-        values in
-    Fmt.pr "%a.\n%!" Fmt.(Dump.list Dkim.pp_dkim) values ;
-    Dkim.digest_body Lwt_io.stdin lwt (module Lwt_flow) prelude |> LwtIO.prj >>= fun body ->
-    let produced_hashes = List.map (Dkim.body_hash_of_dkim body) values in
-    let expected_hashes = List.map Dkim.expected values in
-
-    List.iter2
-      (fun (Dkim.H (k, h)) (Dkim.H (k', h')) -> match Dkim.equal_hash k k' with
-         | Some Dkim.Refl.Refl ->
-           if Digestif.equal k h h'
-           then Fmt.pr "Body is verified.\n%!"
-           else Fmt.pr "Body is alterated (expected: %a, provided: %a).\n%!"
-          (Digestif.pp k) h'
-          (Digestif.pp k) h
-         | None -> assert false)
-      produced_hashes expected_hashes ;
+        extracted.Dkim.dkim_fields in
+    Dkim.digest_body Lwt_io.stdin lwt (module Lwt_flow) ~prelude:extracted.Dkim.prelude
+    |> LwtIO.prj >>= fun body ->
 
     let dns = Udns.create () in
 
-    Lwt_list.map_p (LwtIO.prj <.> Dkim.extract_server dns lwt (module Udns)) values >>= fun svalues ->
+    Lwt_list.map_p (LwtIO.prj <.> Dkim.extract_server dns lwt (module Udns)) mvalues
+    >>= fun svalues ->
+
     let svalues = List.map
         (fun value -> let open Rresult.R in match value >>= Dkim.post_process_server with
            | Ok value -> value
            | Error (`Msg err) -> invalid_arg err)
         svalues in
-    Fmt.pr "%a.\n%!" Fmt.(Dump.list Dkim.pp_server) svalues ; Lwt.return ()
+
+    let ress =
+      list_map3 (fun (raw_field_dkim, raw_dkim, _) dkim server ->
+          Dkim.verify extracted.Dkim.fields (raw_field_dkim, raw_dkim) dkim server body)
+        extracted.dkim_fields mvalues svalues in
+
+    Fmt.pr "%a.\n%!" Fmt.(Dump.list bool) ress ; Lwt.return ()
 
 let () = Lwt_main.run (main ())

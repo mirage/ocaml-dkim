@@ -1,9 +1,19 @@
 (executable
- (name simple_body)
- (modules simple_body)
+ (name body)
+ (modules body)
  (libraries digestif.c dkim alcotest))
+
+(executable
+ (name dkim_field)
+ (modules dkim_field)
+ (libraries dkim alcotest))
 
 (alias
  (name runtest)
- (deps (:simple_body simple_body.exe))
- (action (run %{simple_body} --color=always)))
+ (deps (:body body.exe))
+ (action (run %{body} --color=always)))
+
+(alias
+ (name runtest)
+ (deps (:dkim_field dkim_field.exe))
+ (action (run %{dkim_field} --color=always)))

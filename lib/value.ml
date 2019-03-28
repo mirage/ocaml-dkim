@@ -4,14 +4,13 @@ type canonicalization = Simple | Relaxed | Canonicalization_ext of string
 type base64 = string
 type version = int
 type domain_name = string list
-type field_name = string
 type auid = { local : [ `String of string | `Dot_string of string list ] option; domain : domain_name }
 type quoted_printable = string
 type dns_record = [ `TXT ]
 type query = [ `DNS of dns_record | `Query_ext of string ] * quoted_printable option
 type selector = string list
 type flag = Y | S | Flag_ext of string
-type copies = (field_name * quoted_printable) list
+type copies = (Mrmime.Field.t * quoted_printable) list
 type service = Email | All | Service_ext of string
 type name = Y | S | Name_ext of string
 type server_version = string
@@ -32,7 +31,6 @@ let pp_canonicalization ppf = function
 
 let pp_domain_name = Fmt.(list ~sep:(const string ".") string)
 let pp_selector = Fmt.(list ~sep:(const string ".") string)
-let pp_field = Fmt.using Mrmime.Field.of_string_exn Mrmime.Field.pp
 
 let pp_auid ppf t =
   let pp_local ppf = function
@@ -46,7 +44,7 @@ let pp_query ppf (query, arg) = match query with
   | `DNS `TXT -> Fmt.pf ppf "dns/txt%a" Fmt.(option (prefix (const string ":") string)) arg
   | `Query_ext x -> Fmt.pf ppf "%s%a" x Fmt.(option (prefix (const string ":") string)) arg
 
-let pp_copy = Fmt.Dump.pair pp_field Fmt.string
+let pp_copy = Fmt.Dump.pair Mrmime.Field.pp Fmt.string
 
 let pp_service ppf = function
   | All -> Fmt.string ppf "*"

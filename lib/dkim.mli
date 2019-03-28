@@ -23,12 +23,17 @@ val equal_hash : 'a Digestif.hash -> 'b Digestif.hash -> ('a, 'b) Refl.t option
 val pp_dkim : dkim Fmt.t
 val pp_server : server Fmt.t
 
+type extracted =
+  { dkim_fields : (Mrmime.Field.t * raw * Map.t) list
+  ; fields : (Mrmime.Field.t * string) list
+  ; prelude : string }
+
 val extract_dkim :
   ?newline:newline ->
   'flow ->
   't Sigs.state ->
   (module Sigs.FLOW with type flow = 'flow and type backend = 't) ->
-  ((string * (Mrmime.Field.t * string) list * Map.t list) or_err, 't) Sigs.io
+  (extracted or_err, 't) Sigs.io
 
 val post_process_dkim : Map.t -> dkim or_err
 
@@ -41,13 +46,15 @@ val extract_server :
 
 val post_process_server : Map.t -> server or_err
 
-val digest_fields : (Mrmime.Field.t * String.t) list -> dkim -> value
+val digest_fields : (Mrmime.Field.t * string) list -> dkim -> value
 
 type body
 
 val digest_body :
   ?newline:newline -> 'flow -> 'backend Sigs.state ->
   (module Sigs.FLOW with type flow = 'flow and type backend = 'backend) ->
-  string -> (body, 'backend) Sigs.io
+  prelude:string -> (body, 'backend) Sigs.io
 
 val body_hash_of_dkim : body -> dkim -> value
+val remove_signature_of_raw_dkim : raw -> raw
+val verify : (Mrmime.Field.t * string) list -> (Mrmime.Field.t * raw) -> dkim -> server -> body -> bool
