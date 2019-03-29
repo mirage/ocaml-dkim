@@ -432,6 +432,7 @@ let relaxed_field_canonicalization raw_field_and_value f =
              [])
       <.> (List.fold_left (fun a -> function `CRLF -> a | x -> x :: a) []) in
     let unstructured = unfold unstructured in
+
     List.iter
       (function
         | `CRLF -> ()
@@ -460,13 +461,17 @@ let relaxed_dkim_field_canonicalization (dkim_field:Mrmime.Field.t) raw f =
       List.fold_left (fun a -> function `CRLF when !discard -> a | x -> discard := false ; x :: a) [] in
     (remove_crlf <.> List.rev) <.> (remove_wsp <.> remove_wsp) in
   let unfold =
-    trim <.> List.rev <.> List.fold_left
-      (fun a x -> match a, x with
-         | `WSP _ :: _, `WSP _ -> a
-         | a, x -> x :: a)
-      [] in
+    trim
+    <.> (List.fold_left
+           (fun a x -> match a, x with
+              | `WSP _ :: _, `WSP _ -> a
+              | a, x -> x :: a)
+           [])
+    <.> (List.fold_left (fun a -> function `CRLF -> a | x -> x :: a) []) in
+  let unstructured = unfold raw in
   (* XXX(dinosaure): should be [f "dkim-signature:"]. *)
   f (String.lowercase_ascii (dkim_field :> string)) ; f ":" ;
+
   List.iter
     (function
       | `CRLF -> ()
@@ -475,7 +480,7 @@ let relaxed_dkim_field_canonicalization (dkim_field:Mrmime.Field.t) raw f =
       | `Text x -> f x
       | `WSP _ -> f " "
       | `Encoded t -> f (Mrmime.Encoded_word.reconstruct t))
-    (unfold raw)
+    unstructured
 
 let crlf digest n =
   let rec go = function
@@ -759,6 +764,7 @@ let verify fields (dkim_signature:Mrmime.Field.t * raw) dkim server body =
       | `SHA512, Digestif.SHA512 -> true
       | `MD5, Digestif.MD5 -> true
       | _, _ -> false in
+
     let data_hash = `Digest (Cstruct.of_string (Digestif.to_raw_string k data_hash)) in
     let r0 = Nocrypto.Rsa.PKCS1.verify ~hashp:hash_predicate~key:p ~signature:(Cstruct.of_string dkim.b) data_hash in
     let r1 = verify_body dkim body in
