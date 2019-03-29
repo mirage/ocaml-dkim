@@ -46,7 +46,7 @@ let () =
            | Error (`Msg err) -> invalid_arg err)
         extracted.Dkim.dkim_fields in
 
-    let body = Dkim.digest_body stdin unix (module Caml_flow) ~prelude:extracted.Dkim.prelude in
+    let body = Dkim.extract_body stdin unix (module Caml_flow) ~prelude:extracted.Dkim.prelude in
     let body = UnixIO.prj body in
 
     let dns = Udns.create () in

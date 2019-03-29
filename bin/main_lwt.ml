@@ -53,7 +53,7 @@ let main () =
            | Ok value -> value
            | Error (`Msg err) -> invalid_arg err)
         extracted.Dkim.dkim_fields in
-    Dkim.digest_body Lwt_io.stdin lwt (module Lwt_flow) ~prelude:extracted.Dkim.prelude
+    Dkim.extract_body Lwt_io.stdin lwt (module Lwt_flow) ~prelude:extracted.Dkim.prelude
     |> LwtIO.prj >>= fun body ->
 
     let dns = Udns.create () in

@@ -493,7 +493,7 @@ type iter = string Digestif.iter
 type body = { relaxed : iter
             ; simple : iter }
 
-let digest_body
+let extract_body
   : type flow backend.
     ?newline:newline ->
     flow -> backend state ->
@@ -660,25 +660,6 @@ let body_hash_of_dkim body dkim =
   | Value.Simple -> digesti body.simple
   | Value.Relaxed -> digesti body.relaxed
   | Value.Canonicalization_ext x -> Fmt.invalid_arg "%s canonicalisation is not supported" x
-
-let digest_fields
-  : (Mrmime.Field.t * String.t) list -> dkim -> value
-  = fun others dkim ->
-  let digesti = digesti_of_hash (snd dkim.a) in
-  let canonicalization = match fst dkim.c with
-    | Value.Simple -> simple_field_canonicalization
-    | Value.Relaxed -> relaxed_field_canonicalization
-    | Value.Canonicalization_ext x -> Fmt.invalid_arg "%s canonicalisation is not supported" x in
-  let q = Queue.create () in
-  List.iter
-    (fun requested ->
-       try let field, raw = list_assoc ~equal:Mrmime.Field.equal requested others in
-         Queue.push (field :> string) q ;
-         Queue.push ":" q ;
-         canonicalization raw (fun x -> Queue.push x q)
-       with Not_found -> Fmt.invalid_arg "Field %a not found" Mrmime.Field.pp requested)
-    dkim.h ;
-  digesti (fun f -> Queue.iter f q)
 
 let extract_server
   : type t backend.
