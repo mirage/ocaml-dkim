@@ -574,7 +574,7 @@ let remove_signature_of_raw_dkim raw =
   let is_consecutive_2 a b = a = b - 1 in
 
   List.fold_left
-    (fun (state, sps, acc) x ->
+    (fun (state, acc) x ->
        let rec go state = match state, x with
         | `_0, (#data as x) ->
           ( match Option.(contains x ';'
@@ -588,66 +588,66 @@ let remove_signature_of_raw_dkim raw =
             | Some (a, b, c), _, _ ->
               if is_consecutive_3 a b c
               then let x, continue = remove_while_semicolon ~off:(c + 1) x in
-                if continue then (`R, [], x :: sps @ acc) else (`S, [], x :: sps @ acc)
+                if continue then (`R, x :: acc) else (`S, x :: acc)
               else if is_consecutive_2 a b && b = length x - 1
-              then `_2, [], x :: sps @ acc
+              then `_2, x :: acc
               else if a = length x - 1
-              then `_1, [], x :: sps @ acc
-              else `_0, [], x :: sps @ acc
+              then `_1, x :: acc
+              else `_0, x :: acc
             | _, Some (a, b), _ ->
               if is_consecutive_2 a b && b = length x - 1
-              then `_2, [], x :: sps @ acc
+              then `_2, x :: acc
               else if a = length x - 1
-              then `_1, [], x :: sps @ acc
-              else `_0, [], x :: sps @ acc
+              then `_1, x :: acc
+              else `_0, x :: acc
             | _, _, Some a ->
               if a = length x - 1
-              then `_1, [], x :: sps @ acc
-              else `_0, [], x :: sps @ acc
-            | _, _, _ -> `_0, [], x :: sps @ acc )
+              then `_1, x :: acc
+              else `_0, x :: acc
+            | _, _, _ -> `_0, x :: acc )
         | `_1, (#data as x) ->
           ( match Option.(contains x 'b' >>= fun b -> contains ~off:b x '=' >>= fun c -> Some (b, c)),
                   contains x 'b' with
             | Some (0, 1), _ ->
               let x, continue = remove_while_semicolon ~off:2 x in
               if continue
-              then (`R, [], x :: sps @ acc)
-              else (`S, [], x :: sps @ acc)
+              then (`R, x :: acc)
+              else (`S, x :: acc)
             | _, Some 0 ->
-              if length x = 1 then `_2, [], x :: sps @ acc else go `_0
+              if length x = 1 then `_2, x :: acc else go `_0
             | _, _ -> go `_0 )
-        | `_1, (#noop as x) -> `_1, x :: sps, acc
+        | `_1, (#noop as x) -> `_1, x :: acc
         | `_2, (#data as x) ->
           ( match contains x '=' with
             | Some 0 ->
               let x, continue = remove_while_semicolon ~off:1 x in
-              if continue then (`R, [], x :: sps @ acc) else (`S, [], x :: sps @ acc)
+              if continue then (`R, x :: acc) else (`S, x :: acc)
             | _ -> go `_0 )
-        | `_2, (#noop as x) -> `_2, x :: sps, acc
-        | `R, #noop -> `R, [], acc
+        | `_2, (#noop as x) -> `_2, x :: acc
+        | `R, #noop -> `R, acc
         | `R, (#data as x) ->
           let x, continue = remove_while_semicolon x in
-          if continue then (`R, [], x :: acc) else (`S, [], x :: acc)
-        | ((`_0 | `S) as state), x -> state, [], x :: acc
+          if continue then (`R, x :: acc) else (`S, x :: acc)
+        | ((`_0 | `S) as state), x -> state, x :: acc
        in go state )
-    (`_0, [], []) (`Text ";" :: raw) (* XXX(dinosaure): if [b] starts at the beginning. *)
-  |> fun (state, sps, raw) -> match state, sps, List.rev raw with
-  | (`S | `R), [], (`Text ";" :: raw) ->
+    (`_0, []) (`Text ";" :: raw) (* XXX(dinosaure): if [b] starts at the beginning. *)
+  |> fun (state, raw) -> match state, List.rev raw with
+  | (`S | `R), (`Text ";" :: raw) ->
     let raw = List.fold_left (fun a -> function
         | `Text ""
         | `Encoded { Mrmime.Encoded_word.data= Ok ""; _ } -> a
         | x -> x :: a) [] raw in
     List.rev raw
-  | state, sps, `Text ";" :: _ ->
+  | state, `Text ";" :: _ ->
     let pp_state ppf = function
       | `_0 -> Fmt.string ppf "<state:0>"
       | `_1 -> Fmt.string ppf "<state:1>"
       | `_2 -> Fmt.string ppf "<state:2>"
       | `R -> Fmt.string ppf "<remove-state>"
       | `S -> Fmt.string ppf "<stop-state>" in
-    Fmt.invalid_arg "Bad raw input (state:%a, sps:@[<hov>%a@])"
-      pp_state state (Fmt.brackets Mrmime.Unstructured.pp) sps
-  | _, _, _ -> assert false (* XXX(dinosaure): should never occur! *)
+    Fmt.invalid_arg "Bad raw input (state:%a)"
+      pp_state state
+  | _, _ -> assert false (* XXX(dinosaure): should never occur! *)
 
 let body_hash_of_dkim body dkim =
   let digesti = digesti_of_hash (snd dkim.a) in
@@ -762,6 +762,8 @@ let verify fields (dkim_signature:Mrmime.Field.t * raw) dkim server body =
     let data_hash = `Digest (Cstruct.of_string (Digestif.to_raw_string k data_hash)) in
     let r0 = Nocrypto.Rsa.PKCS1.verify ~hashp:hash_predicate~key:p ~signature:(Cstruct.of_string dkim.b) data_hash in
     let r1 = verify_body dkim body in
+
+    Logs.debug (fun f -> f "state of body: %b, state of header: %b" r1 r0) ;
 
     r0 && r1
   | Some (`EC_pub _) -> Fmt.invalid_arg "We did not handle EC public-key yet!"
