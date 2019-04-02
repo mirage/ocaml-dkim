@@ -735,7 +735,7 @@ let verify fields (dkim_signature:Mrmime.Field.t * raw) dkim server body =
   let _body_hash = body_hash_of_dkim body dkim in
   let H (k, data_hash) = data_hash_of_dkim fields dkim_signature dkim in
   (* DER-encoded X.509 RSAPublicKey. *)
-  match X509.Encoding.public_of_cstruct (Cstruct.of_string server.p) with
+  match X509.Encoding.public_key_of_cstruct (Cstruct.of_string server.p) with
   | Some (`RSA p) ->
     let hash_predicate a = match a, k with
       | `SHA1, Digestif.SHA1 -> true
