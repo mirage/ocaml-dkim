@@ -16,8 +16,8 @@ module Udns = struct
   type backend = UnixIO.t
 
   let getaddrinfo t `TXT domain_name =
-    match getaddrinfo t Udns_map.Txt domain_name with
-    | Ok (_ttl, txtset) -> UnixIO.inj (Ok (Udns_map.TxtSet.elements txtset))
+    match getaddrinfo t Udns.Rr_map.Txt domain_name with
+    | Ok (_ttl, txtset) -> UnixIO.inj (Ok (Udns.Rr_map.Txt_set.elements txtset))
     | Error _ as err -> UnixIO.inj err
 end
 

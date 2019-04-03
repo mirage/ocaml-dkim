@@ -680,8 +680,7 @@ let extract_server
     let domain_name = Domain_name.prepend_exn ~hostname:false domain_name selector in
     Dns.getaddrinfo t `TXT domain_name >>= function
     | Error _ as err -> return err
-    | Ok vss ->
-      let vs = List.map (String.concat "") vss in
+    | Ok vs ->
       (* XXX(dinosaure): RFC 6376 said: Strings in a TXT RR MUST be concatenated
          together before use with no intervening whitespace. *)
       let vs = List.map parse_dkim_server_value vs in
