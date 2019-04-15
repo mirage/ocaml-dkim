@@ -10,8 +10,8 @@ module Udns = struct
 
   let getaddrinfo t `TXT domain_name =
     let open Lwt.Infix in
-    (getaddrinfo t Udns_map.Txt domain_name >|= function
-      | Ok (_ttl, txtset) -> (Ok (Udns_map.TxtSet.elements txtset))
+    (getaddrinfo t Udns.Rr_map.Txt domain_name >|= function
+      | Ok (_ttl, txtset) -> (Ok (Udns.Rr_map.Txt_set.elements txtset))
       | Error _ as err -> err)
     |> LwtIO.inj
 end

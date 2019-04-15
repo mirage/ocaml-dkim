@@ -680,8 +680,7 @@ let extract_server
     let domain_name = Domain_name.prepend_exn ~hostname:false domain_name selector in
     Dns.getaddrinfo t `TXT domain_name >>= function
     | Error _ as err -> return err
-    | Ok vss ->
-      let vs = List.map (String.concat "") vss in
+    | Ok vs ->
       (* XXX(dinosaure): RFC 6376 said: Strings in a TXT RR MUST be concatenated
          together before use with no intervening whitespace. *)
       let vs = List.map parse_dkim_server_value vs in
@@ -735,7 +734,7 @@ let verify fields (dkim_signature:Mrmime.Field.t * raw) dkim server body =
   let _body_hash = body_hash_of_dkim body dkim in
   let H (k, data_hash) = data_hash_of_dkim fields dkim_signature dkim in
   (* DER-encoded X.509 RSAPublicKey. *)
-  match X509.Encoding.public_of_cstruct (Cstruct.of_string server.p) with
+  match X509.Encoding.public_key_of_cstruct (Cstruct.of_string server.p) with
   | Some (`RSA p) ->
     let hash_predicate a = match a, k with
       | `SHA1, Digestif.SHA1 -> true

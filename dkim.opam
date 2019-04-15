@@ -31,5 +31,6 @@ depends: [
   "domain-name"
   "logs"
   "base64"
+  "x509" {>= "0.6.3"}
   "alcotest"   {with-test}
 ]
