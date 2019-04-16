@@ -10,6 +10,12 @@ from an e-mail. Then, it use `x509` and `nocrypto` to verify signature (with
 It provides an Unix and a LWT backend as a part of the
 [MirageOS](https://mirage.io) project. It provides an executable `dkim.verify`
 which can verify an e-mail from a
-[`maildir`](https://github.com/dinosaure/ocaml-maildir.git) in one pass.
+[`maildir`](https://github.com/dinosaure/ocaml-maildir.git) in one pass. You can use it by this way:
+
+```sh
+$ opam pin add https://github.com/dinosaure/ocaml-dkim.git
+$ dkim.verify < /path/to/my/email
+[true]
+```
 
 It follows mostly RFC 6376 - DomainKeys Identified Mail (DKIM) Signatures.
