@@ -1,3 +1,4 @@
 (library
  (name dkim)
- (libraries mrmime digestif.c base64 x509 nocrypto logs domain-name hmap))
+ (public_name dkim)
+ (libraries mrmime digestif base64 x509 nocrypto logs domain-name hmap))

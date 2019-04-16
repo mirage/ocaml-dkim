@@ -1,5 +1,3 @@
-let () = Printexc.record_backtrace true
-
 module UnixIO = Dkim.Sigs.Make(struct type +'a t = 'a end)
 
 module Caml_flow = struct
