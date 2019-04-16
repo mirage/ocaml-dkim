@@ -45,6 +45,9 @@ val post_process_dkim : Map.t -> dkim or_err
    formed values) and return a safe representation of [DKIM-Signature], {!dkim},
    which can be used by {!verify}. *)
 
+val selector : dkim -> string
+val domain : dkim -> Domain_name.t
+
 val extract_server :
   't ->
   'backend Sigs.state ->

@@ -158,6 +158,9 @@ type dkim =
 and hash = V : 'k Digestif.hash -> hash
 and value = H : 'k Digestif.hash * 'k Digestif.t -> value
 
+let selector { s; _ } = s
+let domain { d; _ } = d
+
 type server =
   { v : Value.server_version
   ; h : hash list
