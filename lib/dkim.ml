@@ -512,14 +512,15 @@ let extract_body
 
     let decoder = Body.decoder () in
     let chunk = 0x1000 in
-    let raw = Bytes.create chunk in
+    let raw = Bytes.create (max chunk (String.length prelude)) in
     let qr = Queue.create () in
     let qs = Queue.create () in
     let fr = fun x -> Queue.push x qr in
     let fs = fun x -> Queue.push x qs in
 
     Bytes.blit_string prelude 0 raw 0 (String.length prelude) ;
-    (* XXX(dinosaure): [prelude] comes from [extract_dkim] and should be [<= 0x1000]. *)
+    (* XXX(dinosaure): [prelude] comes from [extract_dkim] and should be [<= 0x1000].
+       Seems to be not true. *)
 
     let digest_stack ?(relaxed= false) f l =
       let rec go = function
