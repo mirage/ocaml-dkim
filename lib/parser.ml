@@ -26,7 +26,7 @@ let is_ftext = function
       DKIM-Signature (which use this character as seperator). *)
   | _ -> false
 
-let field_name = take_while1 is_ftext >>| Mrmime.Field.v
+let field_name = take_while1 is_ftext >>| Mrmime.Field_name.v
 
 (* XXX(dinosaure): [local-part] and [sub-domain] from [colombe]. See RFC 6376:
 

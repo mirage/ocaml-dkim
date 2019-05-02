@@ -6,7 +6,12 @@
 (executable
  (name dkim_field)
  (modules dkim_field)
- (libraries dkim alcotest))
+ (libraries digestif.c dkim alcotest))
+
+(executable
+ (name test)
+ (modules test)
+ (libraries digestif.c dkim alcotest))
 
 (alias
  (name runtest)
@@ -17,3 +22,8 @@
  (name runtest)
  (deps (:dkim_field dkim_field.exe))
  (action (run %{dkim_field} --color=always)))
+
+(alias
+ (name runtest)
+ (deps (:test test.exe) (glob_files raw/*.mail))
+ (action (run %{test} --color=always)))
