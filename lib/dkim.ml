@@ -93,11 +93,11 @@ let sanitize_input newline chunk len = match newline with
 let src = Logs.Src.create "dkim" ~doc:"logs dkim's event"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-let field_dkim_signature = Mrmime.Field.of_string_exn "DKIM-Signature"
+let field_dkim_signature = Mrmime.Field_name.v "DKIM-Signature"
 
 type extracted =
-  { dkim_fields : (Mrmime.Field.t * raw * Map.t) list
-  ; fields : (Mrmime.Field.t * string) list
+  { dkim_fields : (Mrmime.Field_name.t * raw * Map.t) list
+  ; fields : (Mrmime.Field_name.t * string) list
   ; prelude : string }
 
 let extract_dkim
@@ -115,8 +115,8 @@ let extract_dkim
     let chunk = 0x1000 in
     let raw = Bytes.create chunk in
     let buffer = Bigstringaf.create (2 * chunk) in
-    let decoder = St_header.decoder ~field:field_dkim_signature St_header.Value.Unstructured buffer in
-    let rec go others acc = match St_header.decode decoder with
+    let decoder = Hd.decoder ~field_name:field_dkim_signature Hd.Value.Unstructured buffer in
+    let rec go others acc = match Hd.decode decoder with
       | `Field (raw_dkim_field, raw_dkim_value) ->
         let acc = match unfold raw_dkim_value with
           | Error (`Msg err) ->
@@ -135,7 +135,7 @@ let extract_dkim
       | `Await ->
         Flow.input flow raw 0 (Bytes.length raw) >>= fun len ->
         let raw = sanitize_input newline raw len in
-        match St_header.src decoder raw 0 (String.length raw) with
+        match Hd.src decoder raw 0 (String.length raw) with
         | Ok () -> go others acc
         | Error _ as err -> return err in
     go [] []
@@ -147,14 +147,14 @@ type dkim =
   ; bh : value
   ; c : Value.canonicalization * Value.canonicalization
   ; d : Domain_name.t
-  ; h : Mrmime.Field.t list
+  ; h : Mrmime.Field_name.t list
   ; i : Value.auid option
   ; l : int option
   ; q : Value.query list
   ; s : string
   ; t : int64 option
   ; x : int64 option
-  ; z : (Mrmime.Field.t * string) list }
+  ; z : (Mrmime.Field_name.t * string) list }
 and hash = V : 'k Digestif.hash -> hash
 and value = H : 'k Digestif.hash * 'k Digestif.t -> value
 
@@ -208,7 +208,8 @@ let pp_dkim ppf (t:dkim) =
                        z = @[<hov>%a@];@] }"
     t.v Fmt.(Dump.pair Value.pp_algorithm pp_hash) t.a
     pp_hex t.b (pp_signature (snd t.a)) t.bh Fmt.(Dump.pair Value.pp_canonicalization Value.pp_canonicalization) t.c
-    Domain_name.pp t.d Fmt.(Dump.list Mrmime.Field.pp) t.h Fmt.(Dump.option Value.pp_auid) t.i Fmt.(Dump.option int) t.l
+    Domain_name.pp t.d Fmt.(Dump.list Mrmime.Field_name.pp) t.h
+    Fmt.(Dump.option Value.pp_auid) t.i Fmt.(Dump.option int) t.l
     Fmt.(Dump.list Value.pp_query) t.q t.s Fmt.(Dump.option int64) t.t Fmt.(Dump.option int64) t.x
     Fmt.(Dump.list Value.pp_copy) t.z
 
@@ -240,12 +241,12 @@ let string_of_quoted_printable x =
     | `Malformed err -> Rresult.R.error_msg err in
   go ()
 
-module SSet = Set.Make(Mrmime.Field)
+module SSet = Set.Make(Mrmime.Field_name)
 
 let uniqify l =
   let r, _ =
     List.fold_left (fun (r, s) x ->
-        if SSet.exists (Mrmime.Field.equal x) s
+        if SSet.exists (Mrmime.Field_name.equal x) s
         then r, s
         else x :: r, SSet.add x s)
       ([], SSet.empty) l in
@@ -365,7 +366,7 @@ let simple_field_canonicalization raw_field_and_value f =
   (* TODO: delete trailing CRLF. *)
   f raw_field_and_value
 
-let simple_dkim_field_canonicalization (dkim_field:Mrmime.Field.t) raw f =
+let simple_dkim_field_canonicalization (dkim_field:Mrmime.Field_name.t) raw f =
   let raw =
     let remove_crlf =
       let discard = ref true in
@@ -452,7 +453,7 @@ let relaxed_field_canonicalization raw_field_and_value f =
        In other side, we rely on that RFC said [unstructured] __is__ a super-set of
        any other special values (like date). *)
 
-let relaxed_dkim_field_canonicalization (dkim_field:Mrmime.Field.t) raw f =
+let relaxed_dkim_field_canonicalization (dkim_field:Mrmime.Field_name.t) raw f =
   (* XXX(dinosaure): duplicate with [relaxed_field_canonicalization] without
      ["DKIM-Signature"] and trailing [CRLF]. TODO! *)
   let trim =
@@ -694,7 +695,7 @@ let extract_server
       | Some (Ok hmap) -> return (Ok hmap)
       | Some (Error _) -> assert false
 
-let data_hash_of_dkim fields ((field_dkim : Mrmime.Field.t), raw_dkim) dkim =
+let data_hash_of_dkim fields ((field_dkim : Mrmime.Field_name.t), raw_dkim) dkim =
   (* In hash step 2, the Signer/Verifiers MUST pass the following to the hash
      algorithm in the indicated order. *)
   let digesti = digesti_of_hash (snd dkim.a) in
@@ -713,9 +714,9 @@ let data_hash_of_dkim fields ((field_dkim : Mrmime.Field.t), raw_dkim) dkim =
      CRLF. *)
   List.iter
     (fun requested ->
-       try let _, raw = list_assoc ~equal:Mrmime.Field.equal requested fields in
+       try let _, raw = list_assoc ~equal:Mrmime.Field_name.equal requested fields in
          canonicalization raw (fun x -> Queue.push x q)
-       with Not_found -> Fmt.invalid_arg "Field %a not found" Mrmime.Field.pp requested)
+       with Not_found -> Fmt.invalid_arg "Field %a not found" Mrmime.Field_name.pp requested)
     dkim.h ;
   (* The DKIM-Signature header field that exists (verifying) or will be inserted
      (signing) in the message, with the value of the "b=" tag (including all
@@ -734,7 +735,7 @@ let verify_body dkim body =
     Digestif.equal k v v'
   | None -> false
 
-let verify fields (dkim_signature:Mrmime.Field.t * raw) dkim server body =
+let verify fields (dkim_signature:Mrmime.Field_name.t * raw) dkim server body =
   let _body_hash = body_hash_of_dkim body dkim in
   let H (k, data_hash) = data_hash_of_dkim fields dkim_signature dkim in
   (* DER-encoded X.509 RSAPublicKey. *)

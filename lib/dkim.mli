@@ -21,8 +21,8 @@ val pp_dkim : dkim Fmt.t
 val pp_server : server Fmt.t
 
 type extracted =
-  { dkim_fields : (Mrmime.Field.t * raw * Map.t) list
-  ; fields : (Mrmime.Field.t * string) list
+  { dkim_fields : (Mrmime.Field_name.t * raw * Map.t) list
+  ; fields : (Mrmime.Field_name.t * string) list
   ; prelude : string }
 
 val extract_dkim :
@@ -73,7 +73,7 @@ val extract_body :
    [prelude] and with [flow], [state], [(module Flow)] and [?newline] arguments.
    It returns a {!body} which can be used by {!verify}. *)
 
-val verify : (Mrmime.Field.t * string) list -> (Mrmime.Field.t * raw) -> dkim -> server -> body -> bool
+val verify : (Mrmime.Field_name.t * string) list -> (Mrmime.Field_name.t * raw) -> dkim -> server -> body -> bool
 
 (** / *)
 

@@ -6,7 +6,7 @@
 (executable
  (name dkim_field)
  (modules dkim_field)
- (libraries dkim alcotest))
+ (libraries digestif.c dkim alcotest))
 
 (alias
  (name runtest)

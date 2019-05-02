@@ -13,7 +13,7 @@ module K = struct
   let c : (canonicalization * canonicalization) key = Key.create
       { name= "canonicalization"; pp= Fmt.Dump.pair Value.pp_canonicalization Value.pp_canonicalization }
   let d : domain_name key = Key.create { name= "domain"; pp= Value.pp_domain_name }
-  let h : Mrmime.Field.t list key = Key.create { name= "field"; pp= Fmt.Dump.list Mrmime.Field.pp }
+  let h : Mrmime.Field_name.t list key = Key.create { name= "field"; pp= Fmt.Dump.list Mrmime.Field_name.pp }
   let i : auid key = Key.create { name= "auid"; pp= Value.pp_auid }
   let l : int key = Key.create { name="length"; pp= Fmt.int }
   let q : query list key = Key.create { name= "query"; pp= Fmt.Dump.list Value.pp_query }
