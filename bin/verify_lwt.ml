@@ -2,16 +2,16 @@ let () = Printexc.record_backtrace true
 
 module LwtIO = Dkim.Sigs.Make(struct type +'a t = 'a Lwt.t end)
 
-module Udns = struct
-  include Udns_client_lwt
+module Dns = struct
+  include Dns_client_lwt
 
-  type t = Udns_client_lwt.Uflow.t
+  type t = Dns_client_lwt.Uflow.t
   type backend = LwtIO.t
 
   let getaddrinfo t `TXT domain_name =
     let open Lwt.Infix in
-    (getaddrinfo t Udns.Rr_map.Txt domain_name >|= function
-      | Ok (_ttl, txtset) -> (Ok (Udns.Rr_map.Txt_set.elements txtset))
+    (getaddrinfo t Dns.Rr_map.Txt domain_name >|= function
+      | Ok (_ttl, txtset) -> (Ok (Dns.Rr_map.Txt_set.elements txtset))
       | Error _ as err -> err)
     |> LwtIO.inj
 end
@@ -56,9 +56,9 @@ let main () =
     Dkim.extract_body Lwt_io.stdin lwt (module Lwt_flow) ~prelude:extracted.Dkim.prelude
     |> LwtIO.prj >>= fun body ->
 
-    let dns = Udns.create () in
+    let dns = Dns.create () in
 
-    Lwt_list.map_p (LwtIO.prj <.> Dkim.extract_server dns lwt (module Udns)) mvalues
+    Lwt_list.map_p (LwtIO.prj <.> Dkim.extract_server dns lwt (module Dns)) mvalues
     >>= fun svalues ->
 
     let svalues = List.map

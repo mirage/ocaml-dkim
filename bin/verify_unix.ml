@@ -7,15 +7,15 @@ module Caml_flow = struct
   let input flow buf off len = UnixIO.inj (Pervasives.input flow buf off len)
 end
 
-module Udns = struct
-  include Udns_client_unix
+module Dns = struct
+  include Dns_client_unix
 
   type t = Uflow.t
   type backend = UnixIO.t
 
   let getaddrinfo t `TXT domain_name =
-    match getaddrinfo t Udns.Rr_map.Txt domain_name with
-    | Ok (_ttl, txtset) -> UnixIO.inj (Ok (Udns.Rr_map.Txt_set.elements txtset))
+    match getaddrinfo t Dns.Rr_map.Txt domain_name with
+    | Ok (_ttl, txtset) -> UnixIO.inj (Ok (Dns.Rr_map.Txt_set.elements txtset))
     | Error _ as err -> UnixIO.inj err
 end
 
@@ -47,9 +47,9 @@ let () =
     let body = Dkim.extract_body stdin unix (module Caml_flow) ~prelude:extracted.Dkim.prelude in
     let body = UnixIO.prj body in
 
-    let dns = Udns.create () in
+    let dns = Dns.create () in
 
-    let svalues = List.map (UnixIO.prj <.> Dkim.extract_server dns unix (module Udns)) mvalues in
+    let svalues = List.map (UnixIO.prj <.> Dkim.extract_server dns unix (module Dns)) mvalues in
     let svalues = List.map
         (fun value -> let open Rresult.R in match value >>= Dkim.post_process_server with
            | Ok value -> value
