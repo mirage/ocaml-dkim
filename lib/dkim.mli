@@ -96,4 +96,6 @@ val verify :
 (** / *)
 
 val remove_signature_of_raw_dkim : Unstrctrd.t -> Unstrctrd.t
-val relaxed_field_canonicalization : Mrmime.Field_name.t -> Unstrctrd.t -> (string -> unit) -> unit
+
+val relaxed_field_canonicalization :
+  Mrmime.Field_name.t -> Unstrctrd.t -> (string -> unit) -> unit
