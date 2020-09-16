@@ -2,16 +2,13 @@ module Refl : sig
   type ('a, 'b) t = Refl : ('a, 'a) t
 end
 
-module Body = Body
 module Sigs = Sigs
-
-module Map : sig
-  type t
-end
 
 type (+'a, 'err) or_err = ('a, ([> Rresult.R.msg ] as 'err)) result
 
 type newline = CRLF | LF
+
+type map
 
 type dkim
 
@@ -28,7 +25,7 @@ val pp_dkim : dkim Fmt.t
 val pp_server : server Fmt.t
 
 type extracted = {
-  dkim_fields : (Mrmime.Field_name.t * Unstrctrd.t * Map.t) list;
+  dkim_fields : (Mrmime.Field_name.t * Unstrctrd.t * map) list;
   fields : (Mrmime.Field_name.t * Unstrctrd.t) list;
   prelude : string;
 }
@@ -47,9 +44,9 @@ val extract_dkim :
     It tries to extract [DKIM-Signature] fields with value, others fields and
     give a prelude of the body of the e-mail (given by [flow]). *)
 
-val post_process_dkim : Map.t -> (dkim, _) or_err
+val post_process_dkim : map -> (dkim, _) or_err
 (** [post_process_dkim map] from an already parsed [DKIM-Signature] represented
-    by {!Map.t}, we compute a post process analyze (check required/optional well
+    by {!map}, we compute a post process analyze (check required/optional well
     formed values) and return a safe representation of [DKIM-Signature],
     {!dkim}, which can be used by {!verify}. *)
 
@@ -62,14 +59,14 @@ val extract_server :
   'backend Sigs.state ->
   (module Sigs.DNS with type t = 't and type backend = 'backend) ->
   dkim ->
-  ((Map.t, _) or_err, 'backend) Sigs.io
+  ((map, _) or_err, 'backend) Sigs.io
 (** [extract_server dns state (module Dns) dkim] gets public-key noticed by
     [dkim] from authority server over DNS protocol (with Input/Output scheduler
     represented by [state] and primitives implemented by [(module Dns)]). *)
 
-val post_process_server : Map.t -> (server, _) or_err
+val post_process_server : map -> (server, _) or_err
 (** [post_process_server map] from an already parsed TXT record from a DNS
-    service represented by {!Map.t}, we compute a post-process analyze (check
+    service represented by {!map}, we compute a post-process analyze (check
     required/optional well formed values) and return a safe representation of
     public-key, {!server}, which can be used by {!verify}. *)
 

@@ -2,12 +2,12 @@ module Refl = struct
   type ('a, 'b) t = Refl : ('a, 'a) t
 end
 
-module Body = Body
 module Sigs = Sigs
-module Map = Map
 open Sigs
 
 type (+'a, 'err) or_err = ('a, ([> Rresult.R.msg ] as 'err)) result
+
+type map = Map.t
 
 let ( <.> ) f g x = f (g x)
 
@@ -17,16 +17,14 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let trim unstrctrd =
   let fold acc = function
-    | `WSP _ | `FWS _ | `CR | `LF -> acc
+    | `WSP _ | `FWS _  | `CR | `LF -> acc
     | elt -> elt :: acc in
   Unstrctrd.fold ~f:fold [] unstrctrd
-  |> List.rev
-  |> Unstrctrd.of_list
-  |> Rresult.R.get_ok
+  |> List.rev |> Unstrctrd.of_list |> Rresult.R.get_ok
 
 let parse_dkim_field_value unstrctrd =
   let str = Unstrctrd.(to_utf_8_string (trim unstrctrd)) in
-  match Angstrom.parse_string ~consume:All Parser.mail_tag_list str with
+  match Angstrom.parse_string ~consume:All Decoder.mail_tag_list str with
   | Ok v -> Ok v
   | Error _ -> Rresult.R.error_msgf "Invalid DKIM Signature: %S" str
 
@@ -35,13 +33,13 @@ let parse_dkim_server_value str =
   let _, unstrctrd = Unstrctrd.safely_decode str in
   let unstrctrd = trim unstrctrd in
   match
-    Angstrom.parse_string ~consume:All Parser.server_tag_list
+    Angstrom.parse_string ~consume:All Decoder.server_tag_list
       (Unstrctrd.to_utf_8_string unstrctrd)
   with
   | Ok _ as v -> v
   | Error _ ->
-      Log.warn (fun m -> m "Invalid DKIM server value: %S" str) ;
-      Rresult.R.error_msgf "Invalid DKIM value"
+    Log.warn (fun m -> m "Invalid DKIM server value: %S" str) ;
+    Rresult.R.error_msgf "Invalid DKIM value"
 
 type newline = CRLF | LF
 
@@ -128,8 +126,8 @@ let extract_dkim :
              match parse_dkim_field_value v with
              | Ok dkim -> go others ((field_name, v, dkim) :: acc)
              | Error (`Msg err) ->
-                 Log.warn (fun m -> m "Ignore DKIM-Signature: %s." err) ;
-                 go others acc)
+               Log.warn (fun m -> m "Ignore DKIM-Signature: %s." err) ;
+               go others acc)
          | false, Field.Unstructured ->
              let v = to_unstrctrd v in
              go ((field_name, v) :: others) acc
@@ -206,8 +204,8 @@ let pp_hash ppf (V hash) =
   | SHA384 -> Fmt.string ppf "SHA384"
   | SHA512 -> Fmt.string ppf "SHA512"
   | WHIRLPOOL -> Fmt.string ppf "WHIRLPOOL"
-  | BLAKE2B _ -> Fmt.string ppf "BLAKE2B"
-  | BLAKE2S _ -> Fmt.string ppf "BLAKE2S"
+  | BLAKE2B -> Fmt.string ppf "BLAKE2B"
+  | BLAKE2S -> Fmt.string ppf "BLAKE2S"
   | _ -> assert false
 
 let equal_hash :
@@ -223,8 +221,8 @@ let equal_hash :
   | SHA384, SHA384 -> Some Refl.Refl
   | SHA512, SHA512 -> Some Refl.Refl
   | WHIRLPOOL, WHIRLPOOL -> Some Refl.Refl
-  | BLAKE2B x, BLAKE2B y -> if x = y then Some Refl.Refl else None
-  | BLAKE2S x, BLAKE2S y -> if x = y then Some Refl.Refl else None
+  | BLAKE2B, BLAKE2B -> Some Refl.Refl
+  | BLAKE2S, BLAKE2S -> Some Refl.Refl
   | _, _ -> None
 
 let pp_signature (V hash) ppf (H (hash', value)) =
@@ -411,38 +409,36 @@ let simple_dkim_field_canonicalization (dkim_field : Mrmime.Field_name.t) raw f
 
 let trim unstrctrd =
   let space = Unstrctrd.wsp ~len:1 in
-  let fold (acc, state) elt =
-    match elt with
-    | (`WSP _ | `FWS _) when state -> (acc, true)
+  let fold (acc, state) elt = match elt with
+    | `WSP _ | `FWS _ when state -> (acc, true)
     | `WSP _ | `FWS _ -> (space :: acc, state)
     | elt -> (elt :: acc, false) in
-  Unstrctrd.fold ~f:fold ([], true) unstrctrd |> fun (lst, _) ->
-  List.fold_left fold ([], true) lst |> fun (lst, _) ->
-  Unstrctrd.of_list lst |> Rresult.R.get_ok
+  Unstrctrd.fold ~f:fold ([], true) unstrctrd
+  |> fun (lst, _) -> List.fold_left fold ([], true) lst
+  |> fun (lst, _) -> Unstrctrd.of_list lst |> Rresult.R.get_ok
 
 let uniq unstrctrd =
-  let fold (acc, state) elt =
-    match elt with
-    | (`FWS _ | `WSP _) when state -> (acc, true)
+  let fold (acc, state) elt = match elt with
+    | `FWS _ | `WSP _ when state -> (acc, true)
     | `FWS _ | `WSP _ -> (elt :: acc, true)
     | elt -> (elt :: acc, false) in
-  Unstrctrd.fold ~f:fold ([], false) unstrctrd |> fun (lst, _) ->
-  Unstrctrd.of_list (List.rev lst) |> Rresult.R.get_ok
+  Unstrctrd.fold ~f:fold ([], false) unstrctrd
+  |> fun (lst, _) -> Unstrctrd.of_list (List.rev lst)
+  |> Rresult.R.get_ok
 
-let relaxed_field_canonicalization (field_name : Mrmime.Field_name.t) unstrctrd
-    f =
+let relaxed_field_canonicalization
+    (field_name : Mrmime.Field_name.t) unstrctrd f =
   f (String.lowercase_ascii (field_name :> string)) ;
   f ":" ;
   let unstrctrd = (uniq <.> trim) unstrctrd in
   f (Unstrctrd.to_utf_8_string unstrctrd) ;
-  Log.debug (fun m ->
-      m "Digest %s:%s."
-        (String.lowercase_ascii (field_name :> string))
-        (Unstrctrd.to_utf_8_string unstrctrd)) ;
+  Log.debug (fun m -> m "Digest %s:%s."
+                (String.lowercase_ascii (field_name :> string))
+                (Unstrctrd.to_utf_8_string unstrctrd)) ;
   f "\r\n"
 
-let relaxed_dkim_field_canonicalization (field_name : Mrmime.Field_name.t)
-    unstrctrd f =
+let relaxed_dkim_field_canonicalization
+    (field_name : Mrmime.Field_name.t) unstrctrd f =
   f (String.lowercase_ascii (field_name :> string)) ;
   f ":" ;
   (*
@@ -607,18 +603,15 @@ let extract_server :
 
 let assoc field_name fields =
   let res = ref None in
-  List.iter
-    (fun ((field_name', _) as v) ->
+  List.iter (fun ((field_name', _) as v) ->
       if Mrmime.Field_name.equal field_name field_name' && Option.is_none !res
-      then res := Some v)
-    fields ;
+      then res := Some v) fields ;
   !res
 
 let remove_assoc field_name fields =
   let fold (res, deleted) ((field_name', _) as v) =
     if Mrmime.Field_name.equal field_name field_name' && not deleted
-    then (res, true)
-    else (v :: res, deleted) in
+    then (res, true) else (v :: res, deleted) in
   let res, _ = List.fold_left fold ([], false) fields in
   List.rev res
 
@@ -644,16 +637,15 @@ let data_hash_of_dkim fields ((field_dkim : Mrmime.Field_name.t), raw_dkim) dkim
      tag, and canonicalized using the header canonicalization algorithm
      specified in the "c=" tag. Each field MUST be terminated with a single
      CRLF. *)
-  let _ =
-    List.fold_left
-      (fun fields requested ->
-        Log.debug (fun m -> m "Field %a." Mrmime.Field_name.pp requested) ;
-        match assoc requested fields with
-        | Some (field_name, unstrctrd) ->
-            canonicalization field_name unstrctrd (fun x -> Queue.push x q) ;
-            remove_assoc field_name fields
-        | None -> fields)
-      (List.rev fields) dkim.h in
+  let _ = List.fold_left
+    (fun fields requested ->
+      Log.debug (fun m -> m "Field %a." Mrmime.Field_name.pp requested) ;
+      match assoc requested fields with
+      | Some (field_name, unstrctrd) ->
+        canonicalization field_name unstrctrd (fun x -> Queue.push x q) ;
+        remove_assoc field_name fields
+      | None -> fields)
+    (List.rev fields) dkim.h in
   (* The DKIM-Signature header field that exists (verifying) or will be inserted
      (signing) in the message, with the value of the "b=" tag (including all
      surrounding whitespace) deleted (i.e., treated as the empty string),
@@ -668,17 +660,15 @@ let verify_body dkim body =
   let (H (k', v')) = expected dkim in
   match equal_hash k k' with
   | Some Refl.Refl ->
-      Log.debug (fun m ->
-          m "Hash of body (expect: %a): %a." (Digestif.pp k) v' (Digestif.pp k)
-            v) ;
-      Digestif.equal k v v'
+    Log.debug (fun m -> m "Hash of body (expect: %a): %a."
+                  (Digestif.pp k) v' (Digestif.pp k) v) ;
+    Digestif.equal k v v'
   | None -> false
 
 let verify fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t) dkim
     server body =
   let (H (k, hash)) = data_hash_of_dkim fields dkim_signature dkim in
-  Log.debug (fun m ->
-      m "Hash of fields: %a." (pp_signature (V k)) (H (k, hash))) ;
+  Log.debug (fun m -> m "Hash of fields: %a." (pp_signature (V k)) (H (k, hash))) ;
   (* DER-encoded X.509 RSAPublicKey. *)
   match X509.Public_key.decode_der (Cstruct.of_string server.p) with
   | Ok (`RSA key) ->
@@ -692,7 +682,8 @@ let verify fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t) dkim
         | `MD5, Digestif.MD5 -> true
         | _, _ -> false in
 
-      let digest = `Digest (Cstruct.of_string (Digestif.to_raw_string k hash)) in
+      let digest =
+        `Digest (Cstruct.of_string (Digestif.to_raw_string k hash)) in
       let r0 =
         Mirage_crypto_pk.Rsa.PKCS1.verify ~hashp ~key
           ~signature:(Cstruct.of_string dkim.b) digest in
