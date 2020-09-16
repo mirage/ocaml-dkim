@@ -11,7 +11,7 @@
 (executable
  (name test)
  (modules test)
- (libraries digestif.c dkim alcotest))
+ (libraries logs.fmt fmt.tty digestif.c dkim alcotest))
 
 (rule
  (alias runtest)

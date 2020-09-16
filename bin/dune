@@ -2,7 +2,7 @@
  (name verify_unix)
  (public_name dkim.verify)
  (modules verify_unix)
- (libraries dns-client.unix digestif.c dkim))
+ (libraries logs.fmt fmt.tty dns-client.unix digestif.c dkim))
 
 (executable
  (name verify_lwt)

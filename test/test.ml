@@ -1,3 +1,21 @@
+let reporter ppf =
+  let report src level ~over k msgf =
+    let k _ =
+      over () ;
+      k () in
+    let with_metadata header _tags k ppf fmt =
+      Format.kfprintf k ppf
+        ("%a[%a]: " ^^ fmt ^^ "\n%!")
+        Logs_fmt.pp_header (level, header)
+        Fmt.(styled `Magenta string)
+        (Logs.Src.name src) in
+    msgf @@ fun ?header ?tags fmt -> with_metadata header tags k ppf fmt in
+  { Logs.report }
+
+let () = Fmt_tty.setup_std_outputs ~style_renderer:`Ansi_tty ~utf_8:true ()
+let () = Logs.set_reporter (reporter Fmt.stdout)
+let () = Logs.set_level ~all:true (Some Logs.Debug)
+
 let smtpapi__domainkey_sendgrid_info =
   "k=rsa; t=s; \
    p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDPtW5iwpXVPiH5FzJ7Nrl8USzuY9zqqzjE0D1r04xDN6qwziDnmgcFNNfMewVKN2D1O+2J9N14hRprzByFwfQW76yojh54Xu3uSbQ3JP0A7k8o8GutRF8zbFUA8n0ZH2y0cIEjMliXY4W4LwPA7m4q0ObmvSjhd63O9d8z1XkUBwIDAQAB"
@@ -73,7 +91,6 @@ let verify ic =
       Fmt.epr ">>> Impossible to extract DKIM field.\n%!" ;
       err
   | Ok extracted -> (
-      Fmt.epr ">>> DKIM field extracted.\n%!" ;
       let dkim_fields =
         List.fold_left
           (fun a (field, raw, value) ->

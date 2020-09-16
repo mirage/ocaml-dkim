@@ -379,7 +379,8 @@ let h =
   let tag_value =
     let key_h_tag_alg = sha1 <|> sha256 <|> hash_extension in
     key_h_tag_alg >>= fun x ->
-    many (char ':' *> key_h_tag_alg) >>= fun r -> return (x :: r) in
+    many (char ':' *> key_h_tag_alg) >>= fun r ->
+    return (x :: r) in
   tag_spec ~tag_name ~tag_value >>| binding
 
 let k =

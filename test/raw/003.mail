@@ -1,187 +1,81 @@
-Return-Path: <caml-list-owner@inria.fr>
-Delivered-To: unknown
-Received: from pop.gmail.com (74.125.71.108:995) by localhost with POP3-SSL;
-  17 Apr 2019 11:20:28 -0000
+Return-Path: <tbraibant@janestreet.com>
 Delivered-To: romain.calascibetta@gmail.com
-Received: by 10.194.78.9 with SMTP id x9csp355443wjw;
-        Tue, 20 Jan 2015 13:58:14 -0800 (PST)
-X-Received: by 10.194.109.9 with SMTP id ho9mr76578848wjb.29.1421791093802;
-        Tue, 20 Jan 2015 13:58:13 -0800 (PST)
-Received: from mail2-relais-roc.national.inria.fr (mail2-relais-roc.national.inria.fr. [192.134.164.83])
-        by mx.google.com with ESMTP id ew10si3063990wic.34.2015.01.20.13.58.02;
-        Tue, 20 Jan 2015 13:58:13 -0800 (PST)
-Received-SPF: none (google.com: caml-list-owner@inria.fr does not designate permitted sender hosts) client-ip=192.134.164.83;
+Received: by 10.36.56.134 with SMTP id b128csp540801ita;
+        Thu, 29 Oct 2015 08:38:33 -0700 (PDT)
+X-Received: by 10.55.52.210 with SMTP id b201mr3082180qka.37.1446133113260;
+        Thu, 29 Oct 2015 08:38:33 -0700 (PDT)
+Received: from mxout4.mail.janestreet.com (mxout4.mail.janestreet.com. [38.105.200.233])
+        by mx.google.com with ESMTPS id e37si1673465qgd.116.2015.10.29.08.38.33
+        for <romain.calascibetta@gmail.com>
+        (version=TLSv1.2 cipher=ECDHE-RSA-AES128-GCM-SHA256 bits=128/128);
+        Thu, 29 Oct 2015 08:38:33 -0700 (PDT)
+Received-SPF: pass (google.com: domain of tbraibant@janestreet.com designates 38.105.200.233 as permitted sender) client-ip=38.105.200.233;
 Authentication-Results: mx.google.com;
-       spf=none (google.com: caml-list-owner@inria.fr does not designate permitted sender hosts) smtp.mail=caml-list-owner@inria.fr;
-       dkim=neutral (body hash did not verify) header.i=@
-X-IronPort-AV: E=Sophos;i="5.09,437,1418079600"; 
-   d="scan'208";a="117889058"
-Received: from sympa.inria.fr ([193.51.193.213])
-  by mail2-relais-roc.national.inria.fr with ESMTP; 20 Jan 2015 22:57:46 +0100
-Received: by sympa.inria.fr (Postfix, from userid 20132)
-	id 181B27FB98; Tue, 20 Jan 2015 22:57:46 +0100 (CET)
-X-Original-To: caml-list@sympa.inria.fr
-Delivered-To: caml-list@sympa.inria.fr
-Received: from mail2-relais-roc.national.inria.fr (mail2-relais-roc.national.inria.fr [192.134.164.83])
-	by sympa.inria.fr (Postfix) with ESMTPS id 7A3BF7F6D8
-	for <caml-list@sympa.inria.fr>; Tue, 20 Jan 2015 22:57:38 +0100 (CET)
-X-IronPort-Anti-Spam-Filtered: true
-X-IronPort-Anti-Spam-Result: AtQAAMXOvlQmachwnGdsb2JhbABbDoNKWASDA7Nkj1KFcQKBIgdDAQEBAQERAQEBAQEGFglChA0BAQQSER0BASwLAQ8LCw0CAgkdAgIiEgEFAQoSBhMIChCHdgMRAwqwJj4xij5whGIBBYsOA4RaAQEBAQEBBAEBAQEBAQEBARMGCoEXjlgHgmiBQYRDBoUxiCuFUIFKhGWKMRIjgRWCIx2BE1tRAYJCAQEB
-X-IPAS-Result: AtQAAMXOvlQmachwnGdsb2JhbABbDoNKWASDA7Nkj1KFcQKBIgdDAQEBAQERAQEBAQEGFglChA0BAQQSER0BASwLAQ8LCw0CAgkdAgIiEgEFAQoSBhMIChCHdgMRAwqwJj4xij5whGIBBYsOA4RaAQEBAQEBBAEBAQEBAQEBARMGCoEXjlgHgmiBQYRDBoUxiCuFUIFKhGWKMRIjgRWCIx2BE1tRAYJCAQEB
-X-IronPort-AV: E=Sophos;i="5.09,437,1418079600"; 
-   d="scan'208";a="117889045"
-Received: from mxout1.mail.janestreet.com ([38.105.200.112])
-  by mail2-smtp-roc.national.inria.fr with ESMTP/TLS/DHE-RSA-AES256-SHA; 20 Jan 2015 22:57:37 +0100
-Received: from [172.27.56.106] (helo=tot-qpr-mailcore2)
-	by mxout1.mail.janestreet.com with smtp (Exim 4.82)
-	(envelope-from <yminsky@janestreet.com>)
-	id 1YDgnn-0004vt-BP
-	for caml-list@inria.fr; Tue, 20 Jan 2015 16:57:35 -0500
+       spf=pass (google.com: domain of tbraibant@janestreet.com designates 38.105.200.233 as permitted sender) smtp.mailfrom=tbraibant@janestreet.com;
+       dkim=pass header.i=@janestreet.com
+Received: from tot-qpr-mailcore2.delacy.com ([172.27.56.106] helo=tot-qpr-mailcore2)
+	by mxout4.mail.janestreet.com with esmtps (TLSv1:DHE-RSA-AES256-SHA:256)
+	(Exim 4.82)
+	(envelope-from <tbraibant@janestreet.com>)
+	id 1ZrpHc-0003HL-Rl
+	for romain.calascibetta@gmail.com; Thu, 29 Oct 2015 11:38:32 -0400
 X-JS-Flow: external
 Received: by tot-qpr-mailcore2 with JS-mailcore (0.1)
-	(envelope-from <yminsky@janestreet.com>)
-	id BUvs9P-AAACfA-Km; 2015-01-20 16:57:35.340139-05:00
-Received: from mail-lb0-f170.google.com ([209.85.217.170])
-	by mxgoog1.mail.janestreet.com with esmtps (TLSv1:RC4-SHA:128)
+	(envelope-from <tbraibant@janestreet.com>)
+	id BWMj14-AAAA79-Zg; 2015-10-29 11:38:32.817089-04:00
+Received: from mail-vk0-f48.google.com ([209.85.213.48])
+	by mxgoog1.mail.janestreet.com with esmtps (UNKNOWN:AES128-GCM-SHA256:128)
 	(Exim 4.72)
-	(envelope-from <yminsky@janestreet.com>)
-	id 1YDgnm-0007sC-Ve
-	for caml-list@inria.fr; Tue, 20 Jan 2015 16:57:35 -0500
-Received: by mail-lb0-f170.google.com with SMTP id 10so35925073lbg.1
-        for <caml-list@inria.fr>; Tue, 20 Jan 2015 13:57:33 -0800 (PST)
+	(envelope-from <tbraibant@janestreet.com>)
+	id 1ZrpHc-0006AE-Mz
+	for romain.calascibetta@gmail.com; Thu, 29 Oct 2015 11:38:32 -0400
+Received: by vkex70 with SMTP id x70so28855493vke.3
+        for <romain.calascibetta@gmail.com>; Thu, 29 Oct 2015 08:38:32 -0700 (PDT)
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=janestreet.com; s=google;
-        h=mime-version:in-reply-to:references:date:message-id:subject:from:to
-         :cc:content-type;
-        bh=EstZfthSwr7nxMmPF0Efk2IK67cxeVrYNnX4rJlk6oI=;
-        b=VETtn14jrhWNBZywbT0CDi03EL/nY+iEs8OVvh/uEp7bCgWke9IlaVpBTFOiMgn9ys
-         fIXXjBXd5UrCcGUOIoENgrTbBBHkaERwgLiFw2Ydh/YdFr1Iuz0ChSoRa0O9x3ngwvTq
-         bJG2lRDYby2bPh6XR0zBAJVnSD+3bcv5HLGOI=
+        h=mime-version:from:date:message-id:subject:to:content-type;
+        bh=GyAmxDGX0W8Gqaw7woZv/Z1PRyMhWnPrYABiKZttB+E=;
+        b=MglJGvGHXDs+h1G34fzV5w0CLUPwlTpI9SVPFYP3gb504ilBSpDXPBD/6o0SjTNwdB
+         wKZY0tZC7zdTZVsnSd0lbgYYyCNRx1poSAfHSLuvkSLzf9uSrQj/u8LyqnDlIYml3Cw2
+         9OmWEpOoACV11Ews5BgKT4MisOkm+jxPvWA0c=
 X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=1e100.net; s=20130820;
-        h=x-gm-message-state:mime-version:in-reply-to:references:date
-         :message-id:subject:from:to:cc:content-type;
-        bh=EstZfthSwr7nxMmPF0Efk2IK67cxeVrYNnX4rJlk6oI=;
-        b=YapJZSGgAp8pB4x4RdziWgkjUwxec8Hujc/FdVCwJ2Hr7Nd3dS4kxi3ZPEf8NSiHqM
-         y8Itk6zradxwSFnwsm7/nzX5GFrYz9ZjKtC8zd2mvEDb795jDC1Sj3TaqK3U55i0b+3k
-         PXf+efkDq2XxN//HoXUkgOIWKSveq9cTbTwKjGqd2yod1oc7g22zgXYqhbRJ9RBDusPq
-         D5GjmE8Dspdn/uCxcYSw6w1FlH5c9+TbTJzdvz03ksvJsQf6F9cTcwnQ7M3wTiy507eL
-         fAa3rvyso/CvIAyXMYTrgQ/lusZaFJ0vvk0EdjP/Ge4tLbcK4biioPd7oeBZ7lW4PaHI
-         3C9A==
-X-Gm-Message-State: ALoCoQlVQTFiWVMXgbovV84zjD0q/6KKImqVozGeQXoAiY/KBzl9S57CY7g9uzrroN4+0tSAK3/kP9P+DTU5xn+ajpVxkhzzNYTEDdTDc6V+dIdHHjefPE9VKxK92gUWc+OTVtz7HbZx
-X-Received: by 10.152.206.108 with SMTP id ln12mr40925109lac.3.1421791053936;
-        Tue, 20 Jan 2015 13:57:33 -0800 (PST)
+        h=x-gm-message-state:mime-version:from:date:message-id:subject:to
+         :content-type;
+        bh=GyAmxDGX0W8Gqaw7woZv/Z1PRyMhWnPrYABiKZttB+E=;
+        b=H/MIUPm780gvxECQ2E6zVqht23yPf7VIUGg7W8In1ElH7K/bd8erkFs4Ory2Tn7BhG
+         eTo/TDM2V3ZJrkc9MNQ5dHBoEsCWV4M+ocm7vwnbU2c08LXiswrW+LVDY15yi6KMp7QP
+         gLw+8L0u+TC8xaqLU5zyluPPbgW6xZjoRI0SRrIV24SWhdz/so/aru4aDmKNiOphTSwX
+         rEzvu9GvxXHQXilQKpo6fVKv94JA2iqfX8OqN0i0KzePLdT4IgZXiKe7qsJn+jWtsQka
+         f6Uui5FskxKDmhel9Qp4nTW9FvxWyLJGPg3+6/k9W4LAXAMGLdEvc6iFQAtO9Ey8jKfb
+         9jCw==
+X-Gm-Message-State: ALoCoQnOehqqM8cKBmU5xD6x9K2QS1fn5pgrfVkXc6ueHy/+yb43RMqFrkVD9wfV0pf6DdUyKaKtgxo+eRuobnJWnN80Zc/NlHJzBzfcJR6H+gg0/scPh07uznBHaXurujxcwnVbZgj0GtCK+5cZMk77f+Ih/qenag==
+X-Received: by 10.31.33.75 with SMTP id h72mr1665920vkh.144.1446133112476;
+        Thu, 29 Oct 2015 08:38:32 -0700 (PDT)
+X-Received: by 10.31.33.75 with SMTP id h72mr1665915vkh.144.1446133112403;
+ Thu, 29 Oct 2015 08:38:32 -0700 (PDT)
 MIME-Version: 1.0
-X-Received: by 10.152.206.108 with SMTP id ln12mr40925103lac.3.1421791053810;
- Tue, 20 Jan 2015 13:57:33 -0800 (PST)
-Received: by 10.113.5.40 with HTTP; Tue, 20 Jan 2015 13:57:33 -0800 (PST)
-In-Reply-To: <CA+mHimPfz8R6gKeGBzLP2RATEFLv8jOj-Bdd0Cvrfo08YgS2Zw@mail.gmail.com>
-References: <54BBFFF7.6030106@mehnert.org>
-	<CA+mHimPfz8R6gKeGBzLP2RATEFLv8jOj-Bdd0Cvrfo08YgS2Zw@mail.gmail.com>
-Date: Tue, 20 Jan 2015 16:57:33 -0500
-Message-ID: <CACLX4jR0Ujx5pwhYLweRxKU8NVs8Aa5iChfDwCz04fvXd8kt3A@mail.gmail.com>
-From: Yaron Minsky <yminsky@janestreet.com>
-To: Stephen Dolan <stephen.dolan@cl.cam.ac.uk>
-Cc: Hannes Mehnert <hannes@mehnert.org>,
-	caml-list <caml-list@inria.fr>
+Received: by 10.31.135.131 with HTTP; Thu, 29 Oct 2015 08:38:12 -0700 (PDT)
+From: Thomas Braibant <tbraibant@janestreet.com>
+Date: Thu, 29 Oct 2015 11:38:12 -0400
+Message-ID: <CABhmBUFWvxg5nhmh244xz40PnyWV3pQvzHd60mu+jScA+kZH3w@mail.gmail.com>
+Subject: Salle Algorithme, 10 novembre
+To: Roberto Di Cosmo <roberto@dicosmo.org>,
+	=?UTF-8?B?TG91aXMgUm9jaMOp?= <louis@cryptosense.com>,
+	Gabriel Scherer <gabriel.scherer@inria.fr>,
+	Romain Calascibetta <romain.calascibetta@gmail.com>
 Content-Type: text/plain; charset=UTF-8
 X-JS-Processed-by: mailcore
-Subject: Re: [Caml-list] behaviour of mod
-Reply-To: Yaron Minsky <yminsky@janestreet.com>
-X-Loop: caml-list@inria.fr
-X-Sequence: 11046
-Errors-to: caml-list-owner@inria.fr
-Precedence: list
-Precedence: bulk
-Sender: caml-list-request@inria.fr
-X-no-archive: yes
-List-Id: <caml-list.inria.fr>
-List-Archive: <http://sympa.inria.fr/sympa/arc/caml-list>
-List-Help: <mailto:sympa_inria@inria.fr?subject=help>
-List-Owner: <mailto:caml-list-request@inria.fr>
-List-Post: <mailto:caml-list@inria.fr>
-List-Subscribe: <mailto:sympa_inria@inria.fr?subject=subscribe%20caml-list>
-List-Unsubscribe: <mailto:sympa_inria@inria.fr?subject=unsubscribe%20caml-list>
+X-getmail-retrieved-from-mailbox: INBOX
+X-GMAIL-LABELS: =?utf-8?b?IlxcSW1wb3J0YW50Ig==?=
+X-GMAIL-THRID: =?utf-8?q?1516380475326008196?=
+X-GMAIL-MSGID: =?utf-8?q?1516380475326008196?=
 
-Core has an answer to this too.  Core's Int_intf has two extra
-operations, %, for the traditional modular arithmetic mod operator,
-and /%, for the corresponding division operator.  Here's the comment
-on it.  Note that Int.rem is just the mod operator (but we also have
-Int32.rem, Int64.rem, etc.)
+Bonjour Roberto,
 
-  (** There are two pairs of integer division and remainder functions,
-      [/%] and [%], and [/] and [rem].  They both satisfy the same
-      equation relating the quotient and the remainder:
+Est ce que tu peux nous confirmer que la salle algorithme est bien
+reservee pour le meetup le 10 novembre?
 
-      {[
-        x = (x /% y) * y + (x % y);
-        x = (x /  y) * y + (rem x y);
-      ]}
-
-      The functions return the same values if [x] and [y] are
-      positive.  They all raise if [y = 0].
-
-      The functions differ if [x < 0] or [y < 0].
-
-      If [y < 0], then [%] and [/%] raise, whereas [/] and [rem] do
-      not.
-
-      [x % y] always returns a value between 0 and [y - 1], even when
-      [x < 0].  On the other hand, [rem x y] returns a negative value
-      if and only if [x < 0]; that value satisfies [abs (rem x y) <=
-      abs y - 1]. *)
-
-On Mon, Jan 19, 2015 at 5:59 AM, Stephen Dolan
-<stephen.dolan@cl.cam.ac.uk> wrote:
-> On Sun, Jan 18, 2015 at 6:48 PM, Hannes Mehnert <hannes@mehnert.org> wrote:
->> -----BEGIN PGP SIGNED MESSAGE-----
->> Hash: SHA384
->>
->> Hi,
->>
->> is the behaviour of modulo arithmetics intentional:
->>  -5 mod 4 = -1 ?
->>
->> While this reflects the C behaviour, my expectation was to always have
->> a positive result:
->>  -5 mod 4 = 3
->>
->> Any hints?
->
-> Given OCaml's integer division operator, this is the correct "mod".
->
-> The important property is:
->
->     (x / y) * y + (x mod y) = x
->
-> In other words, (x mod y) gives the error by which (x / y) * y fails to equal x.
->
-> There are two reasonable (/, mod) pairs which have this behaviour. The
-> first, which C and OCaml use, is where (x / y) rounds towards zero and
-> (x mod y) has the same sign as x, so -5 / 4 = -1 and -5 mod 4 = -1.
-> The second is where (x / y) rounds down and (x mod y) has the same
-> sign as y, so -5 / 4 = -2 and -5 mod 4 = 3.
->
-> Subjectively, I think the first division operator (round-toward-zero,
-> aka truncate) and the second modulo operator are the more natural. The
-> second modulo operator actually implements modular arithmetic, since
-> with it x mod n buckets the integers x into n equivalence classes
-> differing by multiples of n. But using the first (/) and the second
-> mod breaks the remainder property above.
->
-> Incidentally, Haskell provides both: the first is called (quot, rem)
-> while the second is (div, mod).
->
-> Stephen
->
-> --
-> Caml-list mailing list.  Subscription management and archives:
-> https://sympa.inria.fr/sympa/arc/caml-list
-> Beginner's list: http://groups.yahoo.com/group/ocaml_beginners
-> Bug reports: http://caml.inria.fr/bin/caml-bugs
-
+Merci d'avance.
 -- 
-Caml-list mailing list.  Subscription management and archives:
-https://sympa.inria.fr/sympa/arc/caml-list
-Beginner's list: http://groups.yahoo.com/group/ocaml_beginners
-Bug reports: http://caml.inria.fr/bin/caml-bugs
+Thomas
