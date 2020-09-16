@@ -4,6 +4,8 @@ install:
 script: bash -ex .travis-opam.sh
 sudo: true
 env:
+  global:
+  - PINS="mrmime.dev:https://github.com/mirage/mrmime.git"
   matrix:
   - PACKAGE="dkim" OCAML_VERSION=4.08 TESTS=true
   - PACKAGE="dkim" OCAML_VERSION=4.09 TESTS=true
