@@ -29,8 +29,12 @@ depends: [
   "digestif"
   "hmap"
   "domain-name"
+  "dns-client"
   "logs"
+  "fmt"
   "base64"
+  "mirage-crypto"
+  "mirage-crypto-pk"
   "x509" {>= "0.6.3"}
   "alcotest"   {with-test}
 ]

@@ -1,18 +1,37 @@
 type algorithm = RSA | Algorithm_ext of string
+
 type hash = SHA1 | SHA256 | Hash_ext of string
+
 type canonicalization = Simple | Relaxed | Canonicalization_ext of string
+
 type base64 = string
+
 type version = int
+
 type domain_name = string list
-type auid = { local : [ `String of string | `Dot_string of string list ] option; domain : domain_name }
+
+type auid = {
+  local : [ `String of string | `Dot_string of string list ] option;
+  domain : domain_name;
+}
+
 type quoted_printable = string
+
 type dns_record = [ `TXT ]
-type query = [ `DNS of dns_record | `Query_ext of string ] * quoted_printable option
+
+type query =
+  [ `DNS of dns_record | `Query_ext of string ] * quoted_printable option
+
 type selector = string list
+
 type flag = Y | S | Flag_ext of string
+
 type copies = (Mrmime.Field_name.t * quoted_printable) list
+
 type service = Email | All | Service_ext of string
+
 type name = Y | S | Name_ext of string
+
 type server_version = string
 
 let pp_algorithm ppf = function
@@ -30,6 +49,7 @@ let pp_canonicalization ppf = function
   | Canonicalization_ext x -> Fmt.string ppf x
 
 let pp_domain_name = Fmt.(list ~sep:(const string ".") string)
+
 let pp_selector = Fmt.(list ~sep:(const string ".") string)
 
 let pp_auid ppf t =
@@ -37,12 +57,17 @@ let pp_auid ppf t =
     | `String x -> Fmt.(quote string) ppf x
     | `Dot_string l -> Fmt.(list ~sep:(const string ".") string) ppf l in
   Fmt.pf ppf "{ @[<hov>local = %a;@ domain= %a;@] }"
-    Fmt.(option pp_local) t.local
-    Fmt.(list ~sep:(const string ".") string) t.domain
+    Fmt.(option pp_local)
+    t.local
+    Fmt.(list ~sep:(const string ".") string)
+    t.domain
 
-let pp_query ppf (query, arg) = match query with
-  | `DNS `TXT -> Fmt.pf ppf "dns/txt%a" Fmt.(option (prefix (const string ":") string)) arg
-  | `Query_ext x -> Fmt.pf ppf "%s%a" x Fmt.(option (prefix (const string ":") string)) arg
+let pp_query ppf (query, arg) =
+  match query with
+  | `DNS `TXT ->
+      Fmt.pf ppf "dns/txt%a" Fmt.(option (prefix (const string ":") string)) arg
+  | `Query_ext x ->
+      Fmt.pf ppf "%s%a" x Fmt.(option (prefix (const string ":") string)) arg
 
 let pp_copy = Fmt.Dump.pair Mrmime.Field_name.pp Fmt.string
 

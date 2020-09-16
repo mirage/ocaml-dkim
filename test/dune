@@ -11,19 +11,26 @@
 (executable
  (name test)
  (modules test)
- (libraries digestif.c dkim alcotest))
+ (libraries logs.fmt fmt.tty digestif.c dkim alcotest))
 
-(alias
- (name runtest)
- (deps (:body body.exe))
- (action (run %{body} --color=always)))
+(rule
+ (alias runtest)
+ (deps
+  (:body body.exe))
+ (action
+  (run %{body} --color=always)))
 
-(alias
- (name runtest)
- (deps (:dkim_field dkim_field.exe))
- (action (run %{dkim_field} --color=always)))
+(rule
+ (alias runtest)
+ (deps
+  (:dkim_field dkim_field.exe))
+ (action
+  (run %{dkim_field} --color=always)))
 
-(alias
- (name runtest)
- (deps (:test test.exe) (glob_files raw/*.mail))
- (action (run %{test} --color=always)))
+(rule
+ (alias runtest)
+ (deps
+  (:test test.exe)
+  (glob_files raw/*.mail))
+ (action
+  (run %{test} --color=always)))
