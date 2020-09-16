@@ -2,6 +2,7 @@ module Refl = struct
   type ('a, 'b) t = Refl : ('a, 'a) t
 end
 
+module Body = Body
 module Sigs = Sigs
 open Sigs
 
