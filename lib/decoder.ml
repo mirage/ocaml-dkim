@@ -428,7 +428,7 @@ let server_tag_list =
   let tag_spec = v <|> h <|> k <|> n <|> p <|> s <|> t in
   tag_spec >>= function
   | Some (Map.B (k, v)) ->
-      many (char ';' *> tag_spec)
+      many (char ';' *> tag_spec) <* option () (char ';' *> return ())
       >>| List.fold_left
             (fun hmap -> function Some (Map.B (k, v)) -> Map.add k v hmap
               | None -> hmap)

@@ -47,7 +47,7 @@ let priv_of_seed, pub_of_seed =
   key, Cstruct.to_string (X509.Public_key.encode_der (`RSA public))
 
 let admin__domainkey_x25519_net =
-  Fmt.strf "k=rsa; p=%s" (Base64.encode_exn ~pad:true pub_of_seed)
+  Fmt.strf "k=rsa; p=%s;" (Base64.encode_exn ~pad:true pub_of_seed)
 
 let mails = [ 2, "raw/001.mail"; 1, "raw/002.mail"; 1, "raw/003.mail" ]
 
