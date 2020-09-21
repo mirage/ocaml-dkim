@@ -1,3 +1,5 @@
+let () = Printexc.record_backtrace true
+
 module UnixIO = Dkim.Sigs.Make (struct
   type +'a t = 'a
 end)
@@ -10,15 +12,30 @@ module Caml_flow = struct
   let input flow buf off len = UnixIO.inj (Stdlib.input flow buf off len)
 end
 
+let seed = Base64.decode_exn "Do8KdmOYnU7yzqDn3A3lJwwXPaa1NRdv6E9R2KgZyXg="
+
+let pub_of_seed seed =
+  let g =
+    let seed = Cstruct.of_string seed in
+    Mirage_crypto_rng.(create ~seed (module Fortuna)) in
+  let key = Mirage_crypto_pk.Rsa.generate ~g ~bits:2048 () in
+  let public = Mirage_crypto_pk.Rsa.pub_of_priv key in
+  Cstruct.to_string (X509.Public_key.encode_der (`RSA public))
+
 module Dns = struct
   include Dns_client_unix
 
   type backend = UnixIO.t
 
   let getaddrinfo t `TXT domain_name =
-    match getaddrinfo t Dns.Rr_map.Txt domain_name with
-    | Ok (_ttl, txtset) -> UnixIO.inj (Ok (Dns.Rr_map.Txt_set.elements txtset))
-    | Error _ as err -> UnixIO.inj err
+    match Domain_name.to_string domain_name with
+    | "admin._domainkey.x25519.net" ->
+      let str = Fmt.strf "k=rsa; p=%s" (Base64.encode_exn ~pad:true (pub_of_seed seed)) in
+      UnixIO.inj (Ok [ str ])
+    | _ ->
+      match getaddrinfo t Dns.Rr_map.Txt domain_name with
+      | Ok (_ttl, txtset) -> UnixIO.inj (Ok (Dns.Rr_map.Txt_set.elements txtset))
+      | Error _ as err -> UnixIO.inj err
 end
 
 let ( <.> ) f g x = f (g x)

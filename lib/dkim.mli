@@ -10,17 +10,16 @@ type newline = CRLF | LF
 
 type map
 
-type dkim
+type signed
+type unsigned
+
+type 'a dkim
 
 type server
 
 type body
 
-type hash = V : 'k Digestif.hash -> hash
-
-type value = H : 'k Digestif.hash * 'k Digestif.t -> value
-
-val pp_dkim : dkim Fmt.t
+val pp_dkim : 'a dkim Fmt.t
 
 val pp_server : server Fmt.t
 
@@ -44,21 +43,21 @@ val extract_dkim :
     It tries to extract [DKIM-Signature] fields with value, others fields and
     give a prelude of the body of the e-mail (given by [flow]). *)
 
-val post_process_dkim : map -> (dkim, _) or_err
+val post_process_dkim : map -> (signed dkim, _) or_err
 (** [post_process_dkim map] from an already parsed [DKIM-Signature] represented
     by {!map}, we compute a post process analyze (check required/optional well
     formed values) and return a safe representation of [DKIM-Signature],
     {!dkim}, which can be used by {!verify}. *)
 
-val selector : dkim -> string
+val selector : 'a dkim -> string
 
-val domain : dkim -> [ `host ] Domain_name.t
+val domain : 'a dkim -> [ `host ] Domain_name.t
 
 val extract_server :
   't ->
   'backend Sigs.state ->
   (module Sigs.DNS with type t = 't and type backend = 'backend) ->
-  dkim ->
+  'a dkim ->
   ((map, _) or_err, 'backend) Sigs.io
 (** [extract_server dns state (module Dns) dkim] gets public-key noticed by
     [dkim] from authority server over DNS protocol (with Input/Output scheduler
@@ -85,10 +84,41 @@ val extract_body :
 val verify :
   (Mrmime.Field_name.t * Unstrctrd.t) list ->
   Mrmime.Field_name.t * Unstrctrd.t ->
-  dkim ->
+  signed dkim ->
   server ->
   body ->
   bool
+
+type algorithm = [ `RSA ]
+type hash = [ `SHA1 | `SHA256 ]
+type canonicalization = [ `Simple | `Relaxed ]
+type query = [ `DNS of [ `TXT ] ]
+
+val v :
+  ?version:int ->
+  ?fields:Mrmime.Field_name.t list ->
+  selector:string ->
+  ?algorithm:algorithm ->
+  ?hash:hash ->
+  ?canonicalization:(canonicalization * canonicalization) ->
+  ?length:int ->
+  ?query:query ->
+  ?timestamp:int64 ->
+  ?expiration:int64 ->
+  [ `host ] Domain_name.t -> unsigned dkim
+
+module Encoder : sig
+  val dkim_signature : signed dkim Prettym.t
+  val as_field : signed dkim Prettym.t
+end
+
+val sign :
+  key:Mirage_crypto_pk.Rsa.priv ->
+  ?newline:newline ->
+  'flow ->
+  't Sigs.state ->
+  (module Sigs.FLOW with type flow = 'flow and type backend = 't) ->
+  unsigned dkim -> (signed dkim, 't) Sigs.io
 
 (** / *)
 

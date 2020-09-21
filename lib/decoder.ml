@@ -158,7 +158,7 @@ let qp_section = dkim_quoted_printable
 
 (* XXX(dinosaure): RFC 6376 said: a single line of quoted-printable-encoded
     text. But you know, I'm lazy with this kind of stuff. And it used to have
-    notes. Common! *)
+    notes. Common! TODO(dinosaure): use [pecu]? *)
 
 let selector =
   sub_domain >>= fun x ->
@@ -231,8 +231,9 @@ let b =
       "=" [ [FWS] "=" ] ]. Definition of the hell, a pre-processing is needed in
       this case to concat fragments separated by [FWS]. *)
   let tag_name = string "b" >>| fun _ -> Map.K.b in
-  let tag_value = take_while1 is_base64 in
-  tag_spec ~tag_name ~tag_value >>| binding
+  let tag_value = take_while1 is_base64 >>= fun str -> return str in
+  tag_spec ~tag_name ~tag_value >>| fun v ->
+  binding v
 
 (* sig-bh-tag      = %x62 %x68 [FWS] "=" [FWS] sig-bh-tag-data
     sig-bh-tag-data = base64string *)
@@ -362,7 +363,7 @@ let mail_tag_list =
     <|> z in
   tag_spec >>= function
   | Some (Map.B (k, v)) ->
-      many (char ';' *> tag_spec)
+      many (char ';' *> tag_spec) <* option () (char ';' *> return ())
       >>| List.fold_left
             (fun hmap -> function Some (Map.B (k, v)) -> Map.add k v hmap
               | None -> hmap)

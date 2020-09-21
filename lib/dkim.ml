@@ -29,7 +29,9 @@ let parse_dkim_field_value unstrctrd =
   let str = Unstrctrd.(to_utf_8_string (trim unstrctrd)) in
   match Angstrom.parse_string ~consume:All Decoder.mail_tag_list str with
   | Ok v -> Ok v
-  | Error _ -> Rresult.R.error_msgf "Invalid DKIM Signature: %S" str
+  | Error err ->
+    Fmt.epr ">>> %S.\n%!" err ;
+    Rresult.R.error_msgf "Invalid DKIM Signature: %S" str
 
 let parse_dkim_server_value str =
   let open Rresult in
@@ -43,6 +45,9 @@ let parse_dkim_server_value str =
   | Error _ ->
       Log.warn (fun m -> m "Invalid DKIM server value: %S" str) ;
       Rresult.R.error_msgf "Invalid DKIM value"
+  | exception _ ->
+    Log.warn (fun m -> m "Invalid DKIM server value: %S" str) ;
+    Rresult.R.error_msgf "Invalid DKIM value"
 
 type newline = CRLF | LF
 
@@ -125,6 +130,9 @@ let extract_dkim :
          let (Field.Field (field_name, w, v)) = Location.prj field in
          match (Field_name.equal field_name field_dkim_signature, w) with
          | true, Field.Unstructured -> (
+             (* TODO(dinosaure): we should add [DKIM-Signature] into
+              * [others] when it's possible for a given [DKIM-Signature] to
+              * sign an old one. *)
              let v = to_unstrctrd v in
              match parse_dkim_field_value v with
              | Ok dkim -> go others ((field_name, v, dkim) :: acc)
@@ -161,11 +169,32 @@ let extract_dkim :
          | Error _ as err -> return err) in
    go [] []
 
-type dkim = {
+type whash = V : 'k Digestif.hash -> whash
+
+let pp_hash ppf (V hash) =
+  let open Digestif in
+  match hash with
+  | SHA1 -> Fmt.string ppf "sha1"
+  | SHA256 -> Fmt.string ppf "sha256"
+  | _ -> assert false
+
+let equal_hash :
+    type a b. a Digestif.hash -> b Digestif.hash -> (a, b) Refl.t option =
+ fun a b ->
+  let open Digestif in
+  match (a, b) with
+  | SHA1, SHA1 -> Some Refl.Refl
+  | SHA256, SHA256 -> Some Refl.Refl
+  | _, _ -> None
+
+type vhash = H : 'k Digestif.hash * 'k Digestif.t -> vhash
+
+type signed = string * vhash
+type unsigned = unit
+
+type 'signature dkim = {
   v : int;
-  a : Value.algorithm * hash;
-  b : string;
-  bh : value;
+  a : Value.algorithm * whash;
   c : Value.canonicalization * Value.canonicalization;
   d : [ `host ] Domain_name.t;
   h : Mrmime.Field_name.t list;
@@ -176,57 +205,175 @@ type dkim = {
   t : int64 option;
   x : int64 option;
   z : (Mrmime.Field_name.t * string) list;
+  signature : 'signature;
 }
 
-and hash = V : 'k Digestif.hash -> hash
+type algorithm = [ `RSA ]
+type hash = [ `SHA1 | `SHA256 ]
+type canonicalization = [ `Simple | `Relaxed ]
+type query = [ `DNS of [ `TXT ] ]
 
-and value = H : 'k Digestif.hash * 'k Digestif.t -> value
+let v ?(version= 1) ?(fields= [Mrmime.Field_name.from]) ~selector
+  ?(algorithm= `RSA) ?(hash= `SHA256)
+  ?(canonicalization= `Relaxed, `Relaxed)
+  ?length
+  ?(query= `DNS `TXT)
+  ?timestamp ?expiration
+  domain =
+  if version <> 1
+  then Fmt.invalid_arg "Invalid version number: %d" version ;
+  if List.length fields = 0
+  then Fmt.invalid_arg "Require at last one field to sign an email" ;
+  let a = match algorithm, hash with
+    | `RSA, `SHA1 -> Value.RSA, V Digestif.SHA1
+    | `RSA, `SHA256 -> Value.RSA, V Digestif.SHA256 in
+  let c = match canonicalization with
+    | `Relaxed, `Relaxed -> Value.Relaxed, Value.Relaxed
+    | `Relaxed, `Simple -> Value.Relaxed, Value.Simple
+    | `Simple, `Relaxed -> Value.Simple, Value.Relaxed
+    | `Simple, `Simple -> Value.Simple, Value.Simple in
+  let q = [ ((query, None) :> Value.query) ] in
+  let d = domain in
+  let t = timestamp in
+  let x = expiration in
+  let h =
+    if List.exists Mrmime.Field_name.(equal from) fields
+    then fields else Mrmime.Field_name.from :: fields in
+  let l = length in
+  let s = selector in
+  { v= version; a; c; d; t; x; h; l; s; i= None; z= [];
+    q; signature= (); }
 
 let selector { s; _ } = s
 
 let domain { d; _ } = d
 
+module Encoder = struct
+  open Prettym
+
+  let tag pvalue ppf (key, value) =
+    eval ppf [ box; !!string; cut; char $ '='; !!pvalue; cut; char $ ';'; close ]
+      key value
+
+  let version ppf v =
+    let int ppf v = eval ppf [ !!string ] (string_of_int v) in
+    tag int ppf ("v", v)
+
+  let fields ppf lst =
+    let sep = (fun ppf () -> eval ppf [ cut; char $ ':'; cut ]), () in
+    let field_name ppf (v:Mrmime.Field_name.t) =
+      eval ppf [ !!string ] (String.lowercase_ascii (v :> string)) in
+    eval ppf [ !!(tag (list ~sep field_name)) ] ("h", lst)
+
+  let query ppf v =
+    let query ppf = function
+      | (`DNS `TXT, _) -> eval ppf [ string $ "dns/txt" ]
+      | _ -> assert false in
+    let sep = (fun ppf () -> eval ppf [ cut; char $ ':'; cut ]), () in
+    match v with
+    | List.[] -> ppf
+    | queries -> eval ppf [ !!(tag (list ~sep query)); fws ] ("q", queries)
+
+  let length ppf v =
+    let int ppf v = eval ppf [ !!string ] (string_of_int v) in
+    tag int ppf ("l", v)
+
+  let timestamp ppf v =
+    let int64 ppf v = eval ppf [ !!string ] (Int64.to_string v) in
+    tag int64 ppf ("t", v)
+
+  let expiration ppf v =
+    let int64 ppf v = eval ppf [ !!string ] (Int64.to_string v) in
+    tag int64 ppf ("x", v)
+
+  let domain ppf v =
+    let domain ppf v =
+      eval ppf [ !!string ] (Domain_name.to_string v) in
+    tag domain ppf ("d", v)
+
+  let selector ppf v =
+    tag string ppf ("s", v)
+
+  let canonicalization ppf v =
+    let c ppf = function
+      | (Value.Relaxed, Value.Relaxed) -> string ppf "relaxed/relaxed"
+      | (Value.Simple, Value.Simple) -> string ppf "simple/simple"
+      | (Value.Relaxed, Value.Simple) -> string ppf "relaxed/simple"
+      | (Value.Simple, Value.Relaxed) -> string ppf "simple/relaxed"
+      | _ -> assert false (* TODO *) in
+    tag c ppf ("c", v)
+
+  let algorithm ppf v =
+    let algorithm ppf = function
+      | (Value.RSA, hash) ->
+        let hash = Fmt.strf "%a" pp_hash hash in
+        eval ppf [ string $ "rsa"; cut; char $ '-'; cut; !!string ] hash
+      | _ -> assert false in
+    tag algorithm ppf ("a", v)
+
+  let body_hash ppf v =
+    let hash ppf (H (k, hash)) =
+      let str = Base64.encode_exn ~pad:true (Digestif.to_raw_string k hash) in
+      let rec go ppf idx =
+        if idx = String.length str then ppf
+        else
+          let ppf = eval ppf [ cut; !!char; cut ] str.[idx] in
+          go ppf (succ idx) in
+      go ppf 0 in
+    tag hash ppf ("bh", v)
+
+  let signature ppf v =
+    let signature ppf = function
+      | "" -> ppf
+      | signature ->
+        let str = Base64.encode_exn ~pad:true signature in
+        let rec go ppf idx =
+          if idx = String.length str
+          then ppf
+          else
+            let ppf = eval ppf [ cut; !!char; cut ] str.[idx] in
+            go ppf (succ idx) in
+        go ppf 0 in
+    tag signature ppf ("b", v)
+
+  let option_with_fws fmt ppf = function
+    | None -> ppf | Some v -> eval ppf [ !!fmt; fws ] v
+
+  let dkim_signature ppf (dkim : signed dkim) =
+    let b, bh = dkim.signature in
+    eval ppf [ !!version; fws
+             ; !!algorithm; fws
+             ; !!canonicalization; fws
+             ; !!domain; fws
+             ; !!selector; fws
+             ; !!(option_with_fws timestamp)
+             ; !!(option_with_fws expiration)
+             ; !!query
+             ; !!(option_with_fws length)
+             ; !!body_hash; fws
+             ; !!fields; fws
+             ; !!signature; fws ]
+      dkim.v dkim.a dkim.c dkim.d dkim.s dkim.t dkim.x
+      dkim.q dkim.l
+      bh dkim.h b
+
+  let as_field ppf dkim =
+    eval ppf [ string $ "DKIM-Signature"; char $ ':'; tbox 1; spaces 1; !!dkim_signature; close; new_line ] dkim
+end
+
+let digesti_of_hash (V hash) f =
+  let v = Digestif.digesti_string hash f in
+  H (hash, v)
+
 type server = {
   v : Value.server_version;
-  h : hash list;
+  h : whash list;
   k : Value.algorithm;
   n : string option;
   p : string;
   s : Value.service list;
   t : Value.name list;
 }
-
-let pp_hash ppf (V hash) =
-  let open Digestif in
-  match hash with
-  | MD5 -> Fmt.string ppf "MD5"
-  | SHA1 -> Fmt.string ppf "SHA1"
-  | RMD160 -> Fmt.string ppf "RMD160"
-  | SHA224 -> Fmt.string ppf "SHA224"
-  | SHA256 -> Fmt.string ppf "SHA256"
-  | SHA384 -> Fmt.string ppf "SHA384"
-  | SHA512 -> Fmt.string ppf "SHA512"
-  | WHIRLPOOL -> Fmt.string ppf "WHIRLPOOL"
-  | BLAKE2B -> Fmt.string ppf "BLAKE2B"
-  | BLAKE2S -> Fmt.string ppf "BLAKE2S"
-  | _ -> assert false
-
-let equal_hash :
-    type a b. a Digestif.hash -> b Digestif.hash -> (a, b) Refl.t option =
- fun a b ->
-  let open Digestif in
-  match (a, b) with
-  | MD5, MD5 -> Some Refl.Refl
-  | SHA1, SHA1 -> Some Refl.Refl
-  | RMD160, RMD160 -> Some Refl.Refl
-  | SHA224, SHA224 -> Some Refl.Refl
-  | SHA256, SHA256 -> Some Refl.Refl
-  | SHA384, SHA384 -> Some Refl.Refl
-  | SHA512, SHA512 -> Some Refl.Refl
-  | WHIRLPOOL, WHIRLPOOL -> Some Refl.Refl
-  | BLAKE2B, BLAKE2B -> Some Refl.Refl
-  | BLAKE2S, BLAKE2S -> Some Refl.Refl
-  | _, _ -> None
 
 let pp_signature (V hash) ppf (H (hash', value)) =
   match equal_hash hash hash' with
@@ -240,16 +387,16 @@ let pp_hex ppf str =
     Fmt.pf ppf "%02x" (Char.code str.[i])
   done
 
-let pp_dkim ppf (t : dkim) =
+let pp_dkim
+  : type a. a dkim Fmt.t
+  = fun ppf t ->
   Fmt.pf ppf
-    "{ @[<hov>v = %d;@ a = %a;@ b = %a;@ bh = %a;@ c = %a;@ d = %a;@ h = \
+    "{ @[<hov>v = %d;@ a = %a;@ c = %a;@ d = %a;@ h = \
      @[<hov>%a@];@ i = @[<hov>%a@];@ l = %a;@ q = @[<hov>%a@];@ s = %s;@ t = \
      %a;@ x = %a;@ z = @[<hov>%a@];@] }"
     t.v
     Fmt.(Dump.pair Value.pp_algorithm pp_hash)
-    t.a pp_hex t.b
-    (pp_signature (snd t.a))
-    t.bh
+    t.a
     Fmt.(Dump.pair Value.pp_canonicalization Value.pp_canonicalization)
     t.c Domain_name.pp t.d
     Fmt.(Dump.list Mrmime.Field_name.pp)
@@ -281,7 +428,7 @@ let pp_server ppf (t : server) =
     Fmt.(Dump.list Value.pp_name)
     t.t
 
-let expected { bh; _ } = bh
+let expected : signed dkim -> vhash = fun { signature= (_, bh); _ } -> bh
 
 let hash = function
   | Value.SHA1 -> V Digestif.SHA1
@@ -366,7 +513,8 @@ let post_process_dkim hmap =
         | Ok x -> (f, x)
         | Error (`Msg err) -> invalid_arg err)
       Option.(value ~default:[] (Map.find Map.K.z hmap)) in
-  { v; a; b; bh; c; d; h; i; l; q; s; t; x; z }
+  { v; a; c; d; h; i; l; q; s; t; x; z;
+    signature= b, bh }
 
 let post_process_dkim hmap =
   try Rresult.R.ok (post_process_dkim hmap)
@@ -392,10 +540,6 @@ let post_process_server hmap =
 let post_process_server hmap =
   try Rresult.R.ok (post_process_server hmap)
   with Invalid_argument err -> Rresult.R.error_msg err
-
-let digesti_of_hash (V hash) f =
-  let v = Digestif.digesti_string hash f in
-  H (hash, v)
 
 let simple_field_canonicalization (field_name : Mrmime.Field_name.t) unstrctrd f
     =
@@ -581,11 +725,11 @@ let extract_server :
     t ->
     backend state ->
     (module DNS with type t = t and type backend = backend) ->
-    dkim ->
+    _ dkim ->
     ((Map.t, _) or_err, backend) io =
   fun (type t backend) (t : t) (state : backend state)
       (module Dns : DNS with type t = t and type backend = backend)
-      (dkim : dkim) ->
+      (dkim : _ dkim) ->
    let ( >>= ) = state.bind in
    let return = state.return in
 
@@ -695,8 +839,9 @@ let verify fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t) dkim
 
       let digest = `Digest (Cstruct.of_string (Digestif.to_raw_string k hash)) in
       let r0 =
+        let b, _ = dkim.signature in
         Mirage_crypto_pk.Rsa.PKCS1.verify ~hashp ~key
-          ~signature:(Cstruct.of_string dkim.b) digest in
+          ~signature:(Cstruct.of_string b) digest in
       Log.debug (fun m -> m "Header fields verified: %b." r0) ;
       let r1 = verify_body dkim body in
       Log.debug (fun m -> m "Body verified: %b." r1) ;
@@ -704,3 +849,92 @@ let verify fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t) dkim
       r0 && r1
   | Ok (`EC_pub _) -> Fmt.invalid_arg "We did not handle EC public-key yet!"
   | Error _ -> false
+
+let dkim_field_and_value =
+  let open Angstrom in
+  let open Mrmime in
+  let buf = Bytes.create 0x7f in
+  let is_wsp = function ' ' | '\t' -> true | _ -> false in
+  Field_name.Decoder.field_name >>= fun _ ->
+  skip_while is_wsp *> char ':' *> Unstrctrd_parser.unstrctrd buf
+
+let sign
+  : type flow backend.
+    key:Mirage_crypto_pk.Rsa.priv ->
+    ?newline:newline ->
+    flow ->
+    backend state ->
+    (module FLOW with type flow = flow and type backend = backend) ->
+    unsigned dkim ->
+    (signed dkim, backend) io
+  = fun ~key ?(newline= LF) flow ({ bind; return; } as state) (module Flow) dkim ->
+    let digesti = digesti_of_hash (snd dkim.a) in
+    let canon = match fst dkim.c with
+      | Value.Simple -> simple_field_canonicalization
+      | Value.Relaxed -> relaxed_field_canonicalization
+      | Value.Canonicalization_ext x ->
+        Fmt.invalid_arg "%s canonicalisation is not supported" x in
+    let q = Queue.create () in
+
+    let open Mrmime in
+    let ( >>= ) = bind in
+    let chunk = 0x1000 in
+    let raw = Bytes.create chunk in
+    let buffer = Bigstringaf.create (2 * chunk) in
+    let decoder = Hd.decoder ~p buffer in
+    let rec go fields = match Hd.decode decoder with
+      | `Field field -> (
+        let (Field.Field (field_name, w, v)) = Location.prj field in
+        match w with
+        | Field.Unstructured ->
+          let v = to_unstrctrd v in
+          go ((field_name, v) :: fields)
+        | _ -> assert false)
+      | `Malformed err -> Fmt.invalid_arg "Invalid e-mail: %s" err
+      | `End rest -> return (rest, fields)
+      | `Await ->
+        Flow.input flow raw 0 (Bytes.length raw) >>= fun len ->
+        let raw = sanitize_input newline raw len in
+        match Hd.src decoder raw 0 (String.length raw) with
+        | Ok () -> go fields
+        | Error (`Msg err) -> Fmt.invalid_arg "Invalid e-mail: %s" err in
+    go [] >>= fun (prelude, fields) ->
+    let _ =
+      List.fold_left
+        (fun fields requested ->
+           match assoc requested fields with
+           | Some (field_name, unstrctrd) ->
+             canon field_name unstrctrd (fun x -> Queue.push x q) ;
+             remove_assoc field_name fields
+           | None -> fields)
+        fields dkim.h in
+    extract_body ~newline flow state (module Flow) ~prelude >>= fun body ->
+    let bh = match snd dkim.c with
+      | Value.Simple -> digesti body.simple
+      | Value.Relaxed -> digesti body.relaxed
+      | Value.Canonicalization_ext x ->
+        Fmt.invalid_arg "%s canonicalisation is not supported" x in
+    let dkim' = { dkim with signature= ("", bh) } in
+    let () =
+      let canon = match fst dkim.c with
+        | Value.Simple -> simple_dkim_field_canonicalization
+        | Value.Relaxed -> relaxed_dkim_field_canonicalization
+        | Value.Canonicalization_ext x ->
+          Fmt.invalid_arg "%s canonicalisation is not supported" x in
+      let str = Prettym.to_string ~new_line:"\r\n" Encoder.as_field dkim' in
+      match Angstrom.parse_string ~consume:All dkim_field_and_value str with
+      | Ok unstrctrd -> canon field_dkim_signature unstrctrd (fun x -> Queue.push x q)
+      | Error _ -> assert false (* XXX(dinosaure): must parse! *) in
+    let H (k, vhash) = digesti (fun f -> Queue.iter f q) in
+    let message = `Digest (Cstruct.of_string (Digestif.to_raw_string k vhash)) in
+    let hash = match k with
+      | Digestif.SHA1 -> `SHA1
+      | Digestif.SHA224 -> `SHA224
+      | Digestif.SHA256 -> `SHA256
+      | Digestif.SHA384 -> `SHA384
+      | Digestif.SHA512 -> `SHA512
+      | Digestif.MD5 -> `MD5
+      | _ -> Fmt.invalid_arg "Unrecognized hash" in
+    let signature = Mirage_crypto_pk.Rsa.PKCS1.sign ~hash ~key message in
+    let signature = Cstruct.to_string signature in
+    return { dkim' with signature= (signature, bh) }
