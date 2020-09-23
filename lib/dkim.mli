@@ -1,7 +1,3 @@
-module Refl : sig
-  type ('a, 'b) t = Refl : ('a, 'a) t
-end
-
 module Sigs = Sigs
 
 type (+'a, 'err) or_err = ('a, ([> Rresult.R.msg ] as 'err)) result
@@ -11,6 +7,7 @@ type newline = CRLF | LF
 type map
 
 type signed
+
 type unsigned
 
 type 'a dkim
@@ -40,8 +37,8 @@ val extract_dkim :
     [(module Flow)]. [?newline] specifies kind of contents ([CRLF] from network
     or [LF] from database like {i maildir}).
 
-    It tries to extract [DKIM-Signature] fields with value, others fields and
-    give a prelude of the body of the e-mail (given by [flow]). *)
+    It tries to extract [DKIM-Signature] fields with values, others fields and
+    give a prelude of the body of the email (given by [flow]). *)
 
 val post_process_dkim : map -> (signed dkim, _) or_err
 (** [post_process_dkim map] from an already parsed [DKIM-Signature] represented
@@ -49,9 +46,14 @@ val post_process_dkim : map -> (signed dkim, _) or_err
     formed values) and return a safe representation of [DKIM-Signature],
     {!dkim}, which can be used by {!verify}. *)
 
-val selector : 'a dkim -> string
+val selector : 'a dkim -> [ `raw ] Domain_name.t
+(** [selector dkim] returns the selector of the DKIM-Signature field.
 
-val domain : 'a dkim -> [ `host ] Domain_name.t
+    Selectors might indicate the names of office locations, the signing date, or
+    even an individual user. *)
+
+val domain : 'a dkim -> [ `raw ] Domain_name.t
+(** [domain dkim] returns the domain which signed the mail. *)
 
 val extract_server :
   't ->
@@ -64,10 +66,10 @@ val extract_server :
     represented by [state] and primitives implemented by [(module Dns)]). *)
 
 val post_process_server : map -> (server, _) or_err
-(** [post_process_server map] from an already parsed TXT record from a DNS
-    service represented by {!map}, we compute a post-process analyze (check
+(** [post_process_server map] from an already parsed TXT record (given by a DNS
+    service) represented by {!map}, we compute a post-process analyze (check
     required/optional well formed values) and return a safe representation of
-    public-key, {!server}, which can be used by {!verify}. *)
+    the public-key, {!server}, which can be used by {!verify}. *)
 
 val extract_body :
   ?newline:newline ->
@@ -77,8 +79,8 @@ val extract_body :
   prelude:string ->
   (body, 'backend) Sigs.io
 (** [extract_body ?newline flow state (module Flow) ~prelude] extracts a thin
-    representation of the body of the e-mail. Should follow {!extract_dkim} with
-    [prelude] and with [flow], [state], [(module Flow)] and [?newline]
+    representation of the body of the email. It should follow {!extract_dkim}
+    with [prelude] and with [flow], [state], [(module Flow)] and [?newline]
     arguments. It returns a {!body} which can be used by {!verify}. *)
 
 val verify :
@@ -88,27 +90,49 @@ val verify :
   server ->
   body ->
   bool
+(** [verify fields (dkim_field_name, dkim_value) dkim server body] verifies the
+    given email (represented by {!body}. [fields] and
+    [(dkim_field_name, dkim_value)]) with a signature {!dkim} and the public-key
+    represented by {!server}.
+
+    It returns [true] if signature is correct or [false] if something is wrong.
+
+    Establishing the exact cause of a failed verification if difficult:
+
+    - [selector] can not be found.
+    - Public-key was updated.
+    - [DKIM-Signature] is not well-formed.
+    - etc.
+
+    At least, [dkim] provides some logs to highlight where the verification
+    failed. Finally, the given email should be treated the same as all
+    unverified email - regardless of whether or not it looks like it was signed. *)
 
 type algorithm = [ `RSA ]
+
 type hash = [ `SHA1 | `SHA256 ]
+
 type canonicalization = [ `Simple | `Relaxed ]
+
 type query = [ `DNS of [ `TXT ] ]
 
 val v :
   ?version:int ->
   ?fields:Mrmime.Field_name.t list ->
-  selector:string ->
+  selector:[ `raw ] Domain_name.t ->
   ?algorithm:algorithm ->
   ?hash:hash ->
-  ?canonicalization:(canonicalization * canonicalization) ->
+  ?canonicalization:canonicalization * canonicalization ->
   ?length:int ->
   ?query:query ->
   ?timestamp:int64 ->
   ?expiration:int64 ->
-  [ `host ] Domain_name.t -> unsigned dkim
+  [ `raw ] Domain_name.t ->
+  unsigned dkim
 
 module Encoder : sig
   val dkim_signature : signed dkim Prettym.t
+
   val as_field : signed dkim Prettym.t
 end
 
@@ -118,7 +142,15 @@ val sign :
   'flow ->
   't Sigs.state ->
   (module Sigs.FLOW with type flow = 'flow and type backend = 't) ->
-  unsigned dkim -> (signed dkim, 't) Sigs.io
+  unsigned dkim ->
+  (signed dkim, 't) Sigs.io
+(** [sign ~key ~newline flow state (module Flow) dkim] returns a signed {!dkim}
+    value which can be serialized into the given email (represented by [flow]).
+    According to [dkim], it will sign some fields and the body.
+
+    The returned signed {!dkim} can be serialized with:
+
+    {[ let dkim_field = Prettym.to_string Dkim.Encoder.as_field dkim ]} *)
 
 (** / *)
 

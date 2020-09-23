@@ -179,8 +179,8 @@ let ( <.> ) f g = fun x -> f (g x)
 let test_sign (trust, filename) =
   Alcotest.test_case filename `Quick @@ fun () ->
   let ic = open_in filename in
-  let x25519 = Domain_name.(host_exn <.> of_string_exn) "x25519.net" in
-  let dkim = Dkim.v ~selector:"admin" x25519 in
+  let x25519 = Domain_name.of_string_exn "x25519.net" in
+  let dkim = Dkim.v ~selector:(Domain_name.of_string_exn "admin") x25519 in
   let dkim = Unix_scheduler.prj (Dkim.sign ~key:priv_of_seed ic unix (module Caml_flow) dkim) in
   let oc = open_out (filename ^ ".signed") in
   seek_in ic 0 ;

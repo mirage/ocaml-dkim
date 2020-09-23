@@ -1,21 +1,37 @@
-ocaml-dkim
-----------
+# ocaml-dkim
 
-`ocaml-dkim` is a pure implementation of DKIM in OCaml. It use
-[`mrmime`](https://github.com/mirage/mrmime.git) to parse and extract DKIM field
-from an e-mail. Then, it use `x509` and `nocrypto` to verify signature (with
-[`digestif`](https://github.com/mirage/digestif.git)). Finally, it asks via
-[`udns`](https://github.com/roburio/udns.git) public key.
+`ocaml-dkim` is a pure implementation of DKIM in OCaml. It permits to verify and
+sign an incoming email. It can be use as a SMTP filter service (verify) or as a
+SMTP submission service (sign).
 
-It provides an Unix and a LWT backend as a part of the
-[MirageOS](https://mirage.io) project. It provides an executable `dkim.verify`
-which can verify an e-mail from a
-[`maildir`](https://github.com/dinosaure/ocaml-maildir.git) in one pass. You can use it by this way:
+### How to install it?
+
+You must have an OPAM environment. Then, `ocaml-dkim` can be installed with:
 
 ```sh
 $ opam pin add https://github.com/dinosaure/ocaml-dkim.git
-$ dkim.verify < /path/to/my/email
-[true]
 ```
 
-It follows mostly RFC 6376 - DomainKeys Identified Mail (DKIM) Signatures.
+### How to use it?
+
+`ocaml-dkim` provides 2 binaries, one to verify, the second to sign an email.
+
+```sh
+$ dkim.verify test/raw/001.mail
+[ok]: sendgrid.info
+[ok]: github.com
+```
+
+It shows all domains which signed the given email and whether the signature is
+correct or not (for the last case, it shows you the _selector_). `ocaml-dkim` is
+able to sign an email from a private RSA key and a specific domain such as:
+
+```sh
+$ dkim.sign -k private-key.pem --selector admin --hostname x25519.net test/raw/001.mail
+DKIM-Signature: ...
+Rest of the email
+```
+
+It prints the signed email then. The user is able to use a specific RSA private
+key or it can use a seed used to generate the RSA private key with the _fortuna_
+random number generator.

@@ -232,8 +232,7 @@ let b =
       this case to concat fragments separated by [FWS]. *)
   let tag_name = string "b" >>| fun _ -> Map.K.b in
   let tag_value = take_while1 is_base64 >>= fun str -> return str in
-  tag_spec ~tag_name ~tag_value >>| fun v ->
-  binding v
+  tag_spec ~tag_name ~tag_value >>| fun v -> binding v
 
 (* sig-bh-tag      = %x62 %x68 [FWS] "=" [FWS] sig-bh-tag-data
     sig-bh-tag-data = base64string *)
@@ -363,12 +362,15 @@ let mail_tag_list =
     <|> z in
   tag_spec >>= function
   | Some (Map.B (k, v)) ->
-      many (char ';' *> tag_spec) <* option () (char ';' *> return ())
+      many (char ';' *> tag_spec)
+      <* option () (char ';' *> return ())
       >>| List.fold_left
             (fun hmap -> function Some (Map.B (k, v)) -> Map.add k v hmap
               | None -> hmap)
             (Map.singleton k v)
   | None -> failf "Expect at least one tag"
+
+(* Server part *)
 
 let v =
   let tag_name = string "v" >>| fun _ -> Map.K.sv in
@@ -428,7 +430,8 @@ let server_tag_list =
   let tag_spec = v <|> h <|> k <|> n <|> p <|> s <|> t in
   tag_spec >>= function
   | Some (Map.B (k, v)) ->
-      many (char ';' *> tag_spec) <* option () (char ';' *> return ())
+      many (char ';' *> tag_spec)
+      <* option () (char ';' *> return ())
       >>| List.fold_left
             (fun hmap -> function Some (Map.B (k, v)) -> Map.add k v hmap
               | None -> hmap)

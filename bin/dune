@@ -1,16 +1,13 @@
 (executable
- (name verify_unix)
+ (name verify)
  (public_name dkim.verify)
- (modules verify_unix)
- (libraries logs.fmt fmt.tty dns-client.unix digestif.c dkim))
+ (package dkim)
+ (modules verify)
+ (libraries logs.cli fmt.cli logs.fmt fmt.tty dns-client.unix cmdliner fpath digestif.c dkim))
 
 (executable
- (name sign_unix)
+ (name sign)
  (public_name dkim.sign)
- (modules sign_unix)
- (libraries logs.fmt fmt.tty dns-client.unix digestif.c dkim))
-
-(executable
- (name verify_lwt)
- (modules verify_lwt)
- (libraries dns-client.lwt digestif.c dkim))
+ (package dkim)
+ (modules sign)
+ (libraries logs.cli fmt.cli logs.fmt fmt.tty dns-client.unix cmdliner fpath digestif.c dkim))
