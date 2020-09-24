@@ -16,15 +16,12 @@ build: [
   [ "dune" "runtest" "-p" name "-j" jobs ] {with-test}
 ]
 
-pin-depends: [
-  [ "mrmime.dev" "git+https://github.com/mirage/mrmime.git"]
-]
-
 depends: [
-  "ocaml"      {>= "4.03.0"}
+  "ocaml"      {>= "4.08.0"}
   "dune"       {>= "2.0.0"}
-  "mrmime"
+  "mrmime"     {>= "0.3.1"}
   "digestif"   {>= "0.9.0"}
+  "base-unix"
   "hmap"
   "domain-name"
   "dns-client"
