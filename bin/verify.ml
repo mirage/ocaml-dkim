@@ -1,6 +1,6 @@
 module Unix_scheduler = Dkim.Sigs.Make (struct
-    type +'a t = 'a
-  end)
+  type +'a t = 'a
+end)
 
 module Caml_flow = struct
   type backend = Unix_scheduler.t
@@ -20,7 +20,8 @@ module Dns = struct
 
   let getaddrinfo t `TXT domain_name =
     match getaddrinfo t Dns.Rr_map.Txt domain_name with
-    | Ok (_ttl, txtset) -> Unix_scheduler.inj (Ok (Dns.Rr_map.Txt_set.elements txtset))
+    | Ok (_ttl, txtset) ->
+        Unix_scheduler.inj (Ok (Dns.Rr_map.Txt_set.elements txtset))
     | Error _ as err -> Unix_scheduler.inj err
 end
 
@@ -30,16 +31,14 @@ let unix =
 
 module Flow = struct
   type backend = Unix_scheduler.t
-  type flow =
-    { ic : in_channel
-    ; buffer : Buffer.t
-    ; close : bool }
+
+  type flow = { ic : in_channel; buffer : Buffer.t; close : bool }
 
   let of_input = function
-    | `Input -> { ic= stdin; buffer= Buffer.create 0x1000; close= false }
+    | `Input -> { ic = stdin; buffer = Buffer.create 0x1000; close = false }
     | `Path path ->
-      let ic = open_in (Fpath.to_string path) in
-      { ic; buffer= Buffer.create 0x1000; close= true }
+        let ic = open_in (Fpath.to_string path) in
+        { ic; buffer = Buffer.create 0x1000; close = true }
 
   let close { ic; close; _ } = if close then close_in ic
 
@@ -49,42 +48,57 @@ module Flow = struct
     Unix_scheduler.inj len
 end
 
-let ( <.> ) f g = fun x -> f (g x)
+let ( <.> ) f g x = f (g x)
 
 let show_result ~valid:v_valid ~invalid:v_invalid =
-  let valid dkim = Fmt.pr "[%a]: %a\n%!" Fmt.(styled `Green string) "ok" Domain_name.pp (Dkim.domain dkim) in
-  let invalid dkim = Fmt.pr "[%a]: %a (%a)\n%!" Fmt.(styled `Red string) "er"
-      Domain_name.pp (Dkim.domain dkim) Domain_name.pp (Dkim.selector dkim) in
+  let valid dkim =
+    Fmt.pr "[%a]: %a\n%!"
+      Fmt.(styled `Green string)
+      "ok" Domain_name.pp (Dkim.domain dkim) in
+  let invalid dkim =
+    Fmt.pr "[%a]: %a (%a)\n%!"
+      Fmt.(styled `Red string)
+      "er" Domain_name.pp (Dkim.domain dkim) Domain_name.pp (Dkim.selector dkim)
+  in
   List.iter valid v_valid ;
   List.iter invalid v_invalid
 
 let exit_success = 0
+
 let exit_failure = 1
 
 let run quiet src newline nameserver =
-  let nameserver = match nameserver with
+  let nameserver =
+    match nameserver with
     | Some (inet_addr, port) -> Some (`TCP, (inet_addr, port))
     | None -> None in
   let dns = Dns_client_unix.create ?nameserver () in
   let flow = Flow.of_input src in
   let open Rresult in
-  Unix_scheduler.prj (Dkim.extract_dkim flow unix (module Flow)) >>= fun extracted ->
-  (R.ok <.> Unix_scheduler.prj) (Dkim.extract_body ~newline flow unix (module Flow) ~prelude:extracted.Dkim.prelude) >>= fun body ->
+  Unix_scheduler.prj (Dkim.extract_dkim flow unix (module Flow))
+  >>= fun extracted ->
+  (R.ok <.> Unix_scheduler.prj)
+    (Dkim.extract_body ~newline flow unix
+       (module Flow)
+       ~prelude:extracted.Dkim.prelude)
+  >>= fun body ->
   let f (valid, invalid) (dkim_field_name, dkim_field_value, m) =
     let fiber =
       let ( >>= ) = unix.Dkim.Sigs.bind in
       let return = unix.Dkim.Sigs.return in
-      let ( >>? ) x f = x >>= function
-        | Ok x -> f x | Error err -> return (Error err) in
+      let ( >>? ) x f =
+        x >>= function Ok x -> f x | Error err -> return (Error err) in
       Dkim.post_process_dkim m |> return >>? fun dkim ->
       Dkim.extract_server dns unix (module Dns) dkim >>? fun n ->
       Dkim.post_process_server n |> return >>? fun server ->
       return (Ok (dkim, server)) in
     match Unix_scheduler.prj fiber with
     | Ok (dkim, server) ->
-      let correct = Dkim.verify extracted.Dkim.fields (dkim_field_name, dkim_field_value)
-          dkim server body in
-      if correct then (dkim :: valid, invalid) else (valid, dkim :: invalid)
+        let correct =
+          Dkim.verify extracted.Dkim.fields
+            (dkim_field_name, dkim_field_value)
+            dkim server body in
+        if correct then (dkim :: valid, invalid) else (valid, dkim :: invalid)
     | Error _ -> (valid, invalid) in
   let valid, invalid = List.fold_left f ([], []) extracted.Dkim.dkim_fields in
   if not quiet then show_result ~valid ~invalid ;
@@ -94,26 +108,30 @@ let run quiet src newline nameserver =
   match run quiet src newline nameserver with
   | Ok v -> v
   | Error (`Msg err) ->
-    Fmt.epr "%s: @[@%a@]@." Sys.argv.(0) Fmt.string err ;
-    exit_failure
+      Fmt.epr "%s: @[@%a@]@." Sys.argv.(0) Fmt.string err ;
+      exit_failure
 
 open Cmdliner
 
 let input =
   let parser = function
     | "-" -> Ok `Input
-    | v -> match Fpath.of_string v with
-      | Ok path when Sys.file_exists v && not (Sys.is_directory v) -> Ok (`Path path)
-      | Ok path -> Rresult.R.error_msgf "%a does not exist" Fpath.pp path
-      | Error _ as err -> err in
+    | v ->
+    match Fpath.of_string v with
+    | Ok path when Sys.file_exists v && not (Sys.is_directory v) ->
+        Ok (`Path path)
+    | Ok path -> Rresult.R.error_msgf "%a does not exist" Fpath.pp path
+    | Error _ as err -> err in
   let pp ppf = function
     | `Input -> Fmt.string ppf "-"
     | `Path path -> Fpath.pp ppf path in
   Arg.conv (parser, pp)
 
 let newline =
-  let parser str = match String.lowercase_ascii str with
-    | "lf" -> Ok Dkim.LF | "crlf" -> Ok Dkim.CRLF
+  let parser str =
+    match String.lowercase_ascii str with
+    | "lf" -> Ok Dkim.LF
+    | "crlf" -> Ok Dkim.CRLF
     | _ -> Rresult.R.error_msgf "Invalid newline specification: %S" str in
   let pp ppf = function
     | Dkim.LF -> Fmt.string ppf "lf"
@@ -148,20 +166,23 @@ let setup_logs style_renderer level =
   Fmt_tty.setup_std_outputs ?style_renderer () ;
   Logs.set_level level ;
   Logs.set_reporter (reporter Fmt.stderr) ;
-  Option.is_none level (* XXX(dinosaure): if [None], [-q] is used. *)
+  Option.is_none level
 
-let setup_logs =
-  Term.(const setup_logs $ renderer $ verbosity)
+(* XXX(dinosaure): if [None], [-q] is used. *)
+
+let setup_logs = Term.(const setup_logs $ renderer $ verbosity)
 
 let inet_addr =
   let parser str =
-    try match String.split_on_char ':' str with
+    try
+      match String.split_on_char ':' str with
       | [ ns ] -> Ok (Unix.inet_addr_of_string ns, 53)
       | [ ns; port ] -> Ok (Unix.inet_addr_of_string ns, int_of_string port)
       | _ -> Rresult.R.error_msgf "Invalid nameserver IP: %S" str
     with _exn ->
       Rresult.R.error_msgf "Nameserver must be a valid IPv4: %S" str in
-  let pp ppf (inet_addr, port) = Fmt.pf ppf "%s:%d" (Unix.string_of_inet_addr inet_addr) port in
+  let pp ppf (inet_addr, port) =
+    Fmt.pf ppf "%s:%d" (Unix.string_of_inet_addr inet_addr) port in
   Arg.conv (parser, pp)
 
 let nameserver =
@@ -169,24 +190,31 @@ let nameserver =
   Arg.(value & opt (some inet_addr) None & info [ "nameserver" ] ~doc)
 
 let src =
-  let doc = "The email to verify, if it's omitted, we expect something into the \
-             standard input." in
+  let doc =
+    "The email to verify, if it's omitted, we expect something into the \
+     standard input." in
   Arg.(value & pos ~rev:true 0 input `Input & info [] ~docv:"<input>" ~doc)
 
 let newline =
-  let doc = "Depending on the transmission, an email can use the $(i,CRLF) end-of-line (network transmission) or \
-             the LF end-of-line (UNIX transmission). By default, we assume an UNIX transmission (LF character)." in
+  let doc =
+    "Depending on the transmission, an email can use the $(i,CRLF) end-of-line \
+     (network transmission) or the LF end-of-line (UNIX transmission). By \
+     default, we assume an UNIX transmission (LF character)." in
   Arg.(value & opt newline Dkim.LF & info [ "newline" ] ~doc)
 
 let verify =
   let doc = "Verify DKIM-Signature of the given email." in
   let exits = Term.default_exits in
   let man =
-    [ `S Manpage.s_description
-    ; `P "$(b,verify) does the DKIM verification process. It checks signatures
-          and does the DNS request to verify these signatures. Then, it shows
-          which signature is valid which is not." ] in
-  Term.(const run $ setup_logs $ src $ newline $ nameserver),
-  Term.info "sign" ~doc ~exits ~man
+    [
+      `S Manpage.s_description;
+      `P
+        "$(b,verify) does the DKIM verification process. It checks signatures\n\
+        \          and does the DNS request to verify these signatures. Then, \
+         it shows\n\
+        \          which signature is valid which is not.";
+    ] in
+  ( Term.(const run $ setup_logs $ src $ newline $ nameserver),
+    Term.info "sign" ~doc ~exits ~man )
 
 let () = Term.(exit_status @@ eval verify)

@@ -519,7 +519,8 @@ let post_process_dkim hmap =
   let d =
     match Map.find Map.K.d hmap with
     | Some v ->
-      Rresult.R.failwith_error_msg (Domain_name.of_string (String.concat "." v))
+        Rresult.R.failwith_error_msg
+          (Domain_name.of_string (String.concat "." v))
     | None -> Fmt.failwith "SDID is required" in
   let h =
     match Map.find Map.K.h hmap with
@@ -538,7 +539,8 @@ let post_process_dkim hmap =
   let s =
     match Map.find Map.K.s hmap with
     | Some v ->
-      Rresult.R.failwith_error_msg (Domain_name.of_string (String.concat "." v))
+        Rresult.R.failwith_error_msg
+          (Domain_name.of_string (String.concat "." v))
     | None -> Fmt.failwith "Selector is required" in
   let t = Map.find Map.K.t hmap in
   let x = Map.find Map.K.x hmap in
@@ -767,13 +769,13 @@ let extract_server :
       (dkim : _ dkim) ->
    let ( >>= ) = state.bind in
    let return = state.return in
-   let ( >>? ) x f = x >>= function
-     | Ok x -> f x | Error err -> return (Error err) in
+   let ( >>? ) x f =
+     x >>= function Ok x -> f x | Error err -> return (Error err) in
 
    let domain_name =
      let open Rresult in
-     Domain_name.prepend_label dkim.d "_domainkey" >>=
-     Domain_name.append dkim.s in
+     Domain_name.prepend_label dkim.d "_domainkey" >>= Domain_name.append dkim.s
+   in
    return domain_name >>? fun domain_name ->
    Dns.getaddrinfo t `TXT domain_name >>? fun lst ->
    (* XXX(dinosaure): RFC 6376 said: Strings in a TXT RR MUST be concatenated
@@ -893,6 +895,58 @@ let dkim_field_and_value =
   let is_wsp = function ' ' | '\t' -> true | _ -> false in
   Field_name.Decoder.field_name >>= fun _ ->
   skip_while is_wsp *> char ':' *> Unstrctrd_parser.unstrctrd buf
+
+let server_of_dkim : key:Mirage_crypto_pk.Rsa.priv -> 'a dkim -> server =
+ fun ~key dkim ->
+  let pub = Mirage_crypto_pk.Rsa.pub_of_priv key in
+  let p = Cstruct.to_string (X509.Public_key.encode_der (`RSA pub)) in
+  let k, h = dkim.a in
+  { v = "DKIM1"; h = [ h ]; n = None; k; p; s = []; t = [] }
+
+(* TODO(dinosaure): [s] and [t]. *)
+
+let server_to_string server =
+  let k_to_string = function Value.RSA -> "rsa" | Algorithm_ext v -> v in
+  let h_to_string lst =
+    let h_to_string = function
+      | V Digestif.SHA1 -> "sha1"
+      | V Digestif.SHA256 -> "sha256"
+      | _ -> assert false in
+    let buf = Buffer.create 0x7f in
+    let rec go = function
+      | [] -> Buffer.contents buf
+      | [ x ] ->
+          Buffer.add_string buf (h_to_string x) ;
+          Buffer.contents buf
+      | x :: r ->
+          Buffer.add_string buf (h_to_string x) ;
+          Buffer.add_char buf ':' ;
+          go r in
+    go lst in
+  let lst =
+    [
+      ("v", server.v);
+      ("p", Base64.encode_exn ~pad:true server.p);
+      ("k", k_to_string server.k);
+    ] in
+  let lst = match server.h with [] -> lst | h -> ("h", h_to_string h) :: lst in
+  let lst = Option.fold ~none:lst ~some:(fun n -> ("n", n) :: lst) server.n in
+  let buf = Buffer.create 0x7f in
+  let ppf = Format.formatter_of_buffer buf in
+  let rec go ppf = function
+    | [] -> Format.fprintf ppf "%!"
+    | [ (k, v) ] -> Format.fprintf ppf "%s=%s;" k v
+    | (k, v) :: r ->
+        Format.fprintf ppf "%s=%s; " k v ;
+        go ppf r in
+  go ppf lst ;
+  Buffer.contents buf
+
+let domain_name :
+    'a dkim -> ([ `raw ] Domain_name.t, [> `Msg of string ]) result =
+ fun dkim ->
+  let open Rresult in
+  Domain_name.prepend_label dkim.d "_domainkey" >>= Domain_name.append dkim.s
 
 let sign :
     type flow backend.

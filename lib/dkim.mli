@@ -55,6 +55,11 @@ val selector : 'a dkim -> [ `raw ] Domain_name.t
 val domain : 'a dkim -> [ `raw ] Domain_name.t
 (** [domain dkim] returns the domain which signed the mail. *)
 
+val domain_name :
+  'a dkim -> ([ `raw ] Domain_name.t, [> `Msg of string ]) result
+(** [domain_name dkim] returns the full domain-name where the DNS TXT record can
+    be get. *)
+
 val extract_server :
   't ->
   'backend Sigs.state ->
@@ -151,6 +156,20 @@ val sign :
     The returned signed {!dkim} can be serialized with:
 
     {[ let dkim_field = Prettym.to_string Dkim.Encoder.as_field dkim ]} *)
+
+val server_of_dkim : key:Mirage_crypto_pk.Rsa.priv -> 'a dkim -> server
+(** [server_of_dkim] returns the required server value from a {!dkim} value. The
+    user is able to store the associated server value into the DNS TXT record
+    with {!server_to_string} such as:
+
+    {[
+      let str = Dkim.server_to_string (Dkim.server_of_dkim ~key dkim) in
+      nsupdate (Dkim.domain_name dkim) `TXT str
+    ]} *)
+
+val server_to_string : server -> string
+(** [server_to_string server] generates a [string] from the given [server] value
+    to be able to store the string into the DNS TXT record. *)
 
 (** / *)
 

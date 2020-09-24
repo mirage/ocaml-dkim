@@ -38,18 +38,13 @@ let google__domainkey_janestreet_com =
 
 let seed = Base64.decode_exn "Do8KdmOYnU7yzqDn3A3lJwwXPaa1NRdv6E9R2KgZyXg="
 
-let priv_of_seed, pub_of_seed =
+let priv_of_seed =
   let g =
     let seed = Cstruct.of_string seed in
     Mirage_crypto_rng.(create ~seed (module Fortuna)) in
-  let key = Mirage_crypto_pk.Rsa.generate ~g ~bits:2048 () in
-  let public = Mirage_crypto_pk.Rsa.pub_of_priv key in
-  key, Cstruct.to_string (X509.Public_key.encode_der (`RSA public))
+  Mirage_crypto_pk.Rsa.generate ~g ~bits:2048 ()
 
-let admin__domainkey_x25519_net =
-  Fmt.strf "k=rsa; p=%s;" (Base64.encode_exn ~pad:true pub_of_seed)
-
-let mails = [ 2, "raw/001.mail"; 1, "raw/002.mail"; 1, "raw/003.mail" ]
+let mails = [ (2, "raw/001.mail"); (1, "raw/002.mail"); (1, "raw/003.mail") ]
 
 module Unix_scheduler = Dkim.Sigs.Make (struct
   type +'a t = 'a
@@ -65,24 +60,33 @@ module Caml_flow = struct
 end
 
 module Fake_resolver = struct
-  type t = unit
+  type t = ([ `raw ] Domain_name.t * Dkim.server) option
 
   type backend = Unix_scheduler.t
 
   type error = [ `Not_found ]
 
-  let getaddrinfo () `TXT domain_name =
-    match Domain_name.to_strings domain_name with
-    | [ "smtpapi"; "_domainkey"; "sendgrid"; "info" ] ->
+  let getaddrinfo extra `TXT domain_name =
+    let () =
+      match extra with
+      | Some (v, _) ->
+          Fmt.epr ">>> %a and %a.\n%!" Domain_name.pp v Domain_name.pp
+            domain_name
+      | _ -> () in
+    match (Domain_name.to_strings domain_name, extra) with
+    | [ "smtpapi"; "_domainkey"; "sendgrid"; "info" ], _ ->
         Unix_scheduler.inj (Ok [ smtpapi__domainkey_sendgrid_info ])
-    | [ "s20150108"; "_domainkey"; "github"; "com" ] ->
+    | [ "s20150108"; "_domainkey"; "github"; "com" ], _ ->
         Unix_scheduler.inj (Ok [ s20150108__domainkey_github_com ])
-    | [ "pf2014"; "_domainkey"; "github"; "com" ] ->
+    | [ "pf2014"; "_domainkey"; "github"; "com" ], _ ->
         Unix_scheduler.inj (Ok [ pf2014__domainkey_github_com ])
-    | [ "google"; "_domainkey"; "janestreet"; "com" ] ->
+    | [ "google"; "_domainkey"; "janestreet"; "com" ], _ ->
         Unix_scheduler.inj (Ok [ google__domainkey_janestreet_com ])
-    | [ "admin"; "_domainkey"; "x25519"; "net" ] ->
-        Unix_scheduler.inj (Ok [ admin__domainkey_x25519_net ])
+    | _, Some (domain_name', extra)
+      when Domain_name.equal domain_name domain_name' ->
+        let str = Dkim.server_to_string extra in
+        Fmt.epr ">>> %S.\n%!" str ;
+        Unix_scheduler.inj (Ok [ str ])
     | _ ->
         Unix_scheduler.inj
           (Rresult.R.error_msgf "domain %a does not exists"
@@ -102,7 +106,7 @@ let unzip l =
     | (a, b) :: r -> go (a :: ra, b :: rb) r in
   go ([], []) l
 
-let verify ic =
+let verify dns ic =
   let errors = ref [] in
 
   match Dkim.extract_dkim ic unix (module Caml_flow) |> Unix_scheduler.prj with
@@ -127,7 +131,7 @@ let verify ic =
         List.map
           (fun (_, _, value) ->
             Unix_scheduler.prj
-              (Dkim.extract_server () unix (module Fake_resolver) value))
+              (Dkim.extract_server dns unix (module Fake_resolver) value))
           dkim_fields in
 
       let server_keys, dkim_fields =
@@ -163,44 +167,56 @@ let verify ic =
 let test_verify (trust, filename) =
   Alcotest.test_case filename `Quick @@ fun () ->
   let ic = open_in filename in
-  let rs = verify ic in
+  let rs = verify None ic in
   close_in ic ;
   match rs with
   | Ok rs ->
-    Alcotest.(check int) "DKIM fields" (List.length rs) trust ;
+      Alcotest.(check int) "DKIM fields" (List.length rs) trust ;
       List.iter
         (fun (domain, res) ->
           Alcotest.(check bool) (Domain_name.to_string domain) res true)
         rs
   | Error (`Msg err) -> Alcotest.fail err
 
-let ( <.> ) f g = fun x -> f (g x)
+let ( <.> ) f g x = f (g x)
 
 let test_sign (trust, filename) =
   Alcotest.test_case filename `Quick @@ fun () ->
   let ic = open_in filename in
   let x25519 = Domain_name.of_string_exn "x25519.net" in
   let dkim = Dkim.v ~selector:(Domain_name.of_string_exn "admin") x25519 in
-  let dkim = Unix_scheduler.prj (Dkim.sign ~key:priv_of_seed ic unix (module Caml_flow) dkim) in
+  let dkim =
+    Unix_scheduler.prj
+      (Dkim.sign ~key:priv_of_seed ic unix (module Caml_flow) dkim) in
   let oc = open_out (filename ^ ".signed") in
   seek_in ic 0 ;
   output_string oc (Prettym.to_string ~new_line:"\n" Dkim.Encoder.as_field dkim) ;
   let tmp = Bytes.create 0x1000 in
   let rec go () =
     let len = input ic tmp 0 (Bytes.length tmp) in
-    if len = 0 then ()
-    else ( output_string oc (Bytes.sub_string tmp 0 len) ; go () ) in
-  go () ; close_in ic ; close_out oc ;
+    if len = 0
+    then ()
+    else (
+      output_string oc (Bytes.sub_string tmp 0 len) ;
+      go ()) in
+  go () ;
+  close_in ic ;
+  close_out oc ;
   let ic = open_in (filename ^ ".signed") in
-  let rs = verify ic in
+  let server = Dkim.server_of_dkim ~key:priv_of_seed dkim in
+  let domain_name = Rresult.R.get_ok (Dkim.domain_name dkim) in
+  let rs = verify (Some (domain_name, server)) ic in
   match rs with
   | Ok rs ->
-    Alcotest.(check int) "DKIM fields" (List.length rs) (succ trust) ;
-    List.iter
-      (fun (domain, res) ->
-         Alcotest.(check bool) (Domain_name.to_string domain) res true)
-      rs
+      Alcotest.(check int) "DKIM fields" (List.length rs) (succ trust) ;
+      List.iter
+        (fun (domain, res) ->
+          Alcotest.(check bool) (Domain_name.to_string domain) res true)
+        rs
   | Error (`Msg err) -> Alcotest.fail err
 
-let () = Alcotest.run "ocaml-dkim" [ ("verify", List.map test_verify mails)
-                                   ; ("sign", List.map test_sign mails) ]
+let () =
+  Alcotest.run "ocaml-dkim"
+    [
+      ("verify", List.map test_verify mails); ("sign", List.map test_sign mails);
+    ]
