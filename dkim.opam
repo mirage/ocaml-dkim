@@ -25,14 +25,14 @@ depends: [
   "base-unix"
   "hmap"
   "domain-name"
-  "dns-client"
+  "dns-client" {>= "5.0.0"}
   "cmdliner"
   "logs"
   "fmt"
   "fpath"
   "base64"     {>= "3.0.0"}
-  "mirage-crypto"
-  "mirage-crypto-pk"
+  "mirage-crypto" {>= "0.9.2"}
+  "mirage-crypto-pk" {>= "0.9.2"}
   "x509" {>= "0.6.3"}
   "alcotest"   {with-test}
 ]

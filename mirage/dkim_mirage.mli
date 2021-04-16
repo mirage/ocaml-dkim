@@ -4,11 +4,11 @@ module Make
     (R : Mirage_random.S)
     (T : Mirage_time.S)
     (C : Mirage_clock.MCLOCK)
-    (S : Mirage_stack.V4) : sig
+    (S : Mirage_stack.V4V6) : sig
   val verify :
     ?newline:Dkim.newline ->
     ?size:int ->
-    ?nameserver:[ `TCP | `UDP ] * (Ipaddr.V4.t * int) ->
+    ?nameserver:[ `TCP | `UDP ] * (Ipaddr.t * int) ->
     ?timeout:int64 ->
     (string * int * int) stream ->
     S.t ->

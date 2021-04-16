@@ -65,7 +65,7 @@ module Make
     (R : Mirage_random.S)
     (T : Mirage_time.S)
     (C : Mirage_clock.MCLOCK)
-    (S : Mirage_stack.V4) =
+    (S : Mirage_stack.V4V6) =
 struct
   module DNS = struct
     include Dns_client_mirage.Make (R) (T) (C) (S)

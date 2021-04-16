@@ -55,6 +55,8 @@ val selector : 'a dkim -> [ `raw ] Domain_name.t
 val domain : 'a dkim -> [ `raw ] Domain_name.t
 (** [domain dkim] returns the domain which signed the mail. *)
 
+val fields : 'a dkim -> Mrmime.Field_name.t list
+
 val domain_name :
   'a dkim -> ([ `raw ] Domain_name.t, [> `Msg of string ]) result
 (** [domain_name dkim] returns the full domain-name where the DNS TXT record can
