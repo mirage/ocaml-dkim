@@ -874,7 +874,9 @@ let verify fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t) dkim
     | `MD5, Digestif.MD5 -> true
     | _, _ -> false in
 
-  match X509.Public_key.decode_der (Cstruct.of_string server.p), fst dkim.a with
+  match
+    (X509.Public_key.decode_der (Cstruct.of_string server.p), fst dkim.a)
+  with
   | Ok (`RSA key), Value.RSA ->
       let digest = `Digest (Cstruct.of_string (Digestif.to_raw_string k hash)) in
       let r0 =
@@ -887,7 +889,7 @@ let verify fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t) dkim
 
       r0 && r1
   | Ok (`ED25519 key), Value.ED25519 ->
-      let msg = (Cstruct.of_string (Digestif.to_raw_string k hash)) in
+      let msg = Cstruct.of_string (Digestif.to_raw_string k hash) in
       let r0 =
         let b, _ = dkim.signature in
         Mirage_crypto_ec.Ed25519.verify ~key (Cstruct.of_string b) ~msg in
