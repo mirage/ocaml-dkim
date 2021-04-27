@@ -27,4 +27,8 @@ depends: [
   "mirage-stack"
   "lwt"
   "alcotest"   {with-test}
+  "digestif"   {with-test}
+  "fmt"        {with-test}
+  "logs"       {with-test}
+  "mirage-crypto-rng" {with-test}
 ]
