@@ -70,7 +70,7 @@ let exit_failure = 1
 let run quiet src newline nameserver =
   let nameserver =
     match nameserver with
-    | Some (inet_addr, port) -> Some (`TCP, (inet_addr, port))
+    | Some (inet_addr, port) -> Some (`TCP, (Ipaddr_unix.of_inet_addr inet_addr, port))
     | None -> None in
   let dns = Dns_client_unix.create ?nameserver () in
   let flow = Flow.of_input src in

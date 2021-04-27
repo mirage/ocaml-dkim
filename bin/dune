@@ -4,7 +4,7 @@
  (package dkim)
  (modules verify)
  (libraries logs.cli fmt.cli logs.fmt fmt.tty dns-client.unix cmdliner fpath
-   digestif.c dkim))
+   digestif.c ipaddr.unix dkim))
 
 (executable
  (name sign)

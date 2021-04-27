@@ -210,6 +210,8 @@ type 'signature dkim = {
   signature : 'signature;
 }
 
+let fields { h; _ } = h
+
 type algorithm = [ `RSA ]
 
 type hash = [ `SHA1 | `SHA256 ]
@@ -322,6 +324,9 @@ module Encoder = struct
       | Value.RSA, hash ->
           let hash = Fmt.strf "%a" pp_hash hash in
           eval ppf [ string $ "rsa"; cut; char $ '-'; cut; !!string ] hash
+      | Value.ED25519, hash ->
+          let hash = Fmt.strf "%a" pp_hash hash in
+          eval ppf [ string $ "ed25519"; cut; char $ '-'; cut; !!string ] hash
       | Value.Algorithm_ext v, hash ->
           let hash = Fmt.strf "%a" pp_hash hash in
           eval ppf [ !!string; cut; char $ '-'; cut; !!string ] v hash in
@@ -859,18 +864,18 @@ let verify fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t) dkim
   Log.debug (fun m ->
       m "Hash of fields: %a." (pp_signature (V k)) (H (k, hash))) ;
   (* DER-encoded X.509 RSAPublicKey. *)
-  match X509.Public_key.decode_der (Cstruct.of_string server.p) with
-  | Ok (`RSA key) ->
-      let hashp a =
-        match (a, k) with
-        | `SHA1, Digestif.SHA1 -> true
-        | `SHA224, Digestif.SHA224 -> true
-        | `SHA256, Digestif.SHA256 -> true
-        | `SHA384, Digestif.SHA384 -> true
-        | `SHA512, Digestif.SHA512 -> true
-        | `MD5, Digestif.MD5 -> true
-        | _, _ -> false in
+  let hashp a =
+    match (a, k) with
+    | `SHA1, Digestif.SHA1 -> true
+    | `SHA224, Digestif.SHA224 -> true
+    | `SHA256, Digestif.SHA256 -> true
+    | `SHA384, Digestif.SHA384 -> true
+    | `SHA512, Digestif.SHA512 -> true
+    | `MD5, Digestif.MD5 -> true
+    | _, _ -> false in
 
+  match X509.Public_key.decode_der (Cstruct.of_string server.p), fst dkim.a with
+  | Ok (`RSA key), Value.RSA ->
       let digest = `Digest (Cstruct.of_string (Digestif.to_raw_string k hash)) in
       let r0 =
         let b, _ = dkim.signature in
@@ -881,10 +886,20 @@ let verify fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t) dkim
       Log.debug (fun m -> m "Body verified: %b." r1) ;
 
       r0 && r1
-  | Ok (`EC_pub _) ->
-      Log.err (fun m -> m "We handle only RSA algorithm.") ;
+  | Ok (`ED25519 key), Value.ED25519 ->
+      let msg = (Cstruct.of_string (Digestif.to_raw_string k hash)) in
+      let r0 =
+        let b, _ = dkim.signature in
+        Mirage_crypto_ec.Ed25519.verify ~key (Cstruct.of_string b) ~msg in
+      Log.debug (fun m -> m "Header fields verified: %b." r0) ;
+      let r1 = verify_body dkim body in
+      Log.debug (fun m -> m "Body verified: %b." r1) ;
+
+      r0 && r1
+  | Ok _, _ ->
+      Log.err (fun m -> m "We handle only RSA & ED25519 algorithms.") ;
       false
-  | Error (`Msg err) ->
+  | Error (`Msg err), _ ->
       Log.err (fun m -> m "Invalid DER-encoded X.509 RSA public-key: %s" err) ;
       false
 
@@ -906,7 +921,10 @@ let server_of_dkim : key:Mirage_crypto_pk.Rsa.priv -> 'a dkim -> server =
 (* TODO(dinosaure): [s] and [t]. *)
 
 let server_to_string server =
-  let k_to_string = function Value.RSA -> "rsa" | Algorithm_ext v -> v in
+  let k_to_string = function
+    | Value.RSA -> "rsa"
+    | Value.ED25519 -> "ed25519"
+    | Value.Algorithm_ext v -> v in
   let h_to_string lst =
     let h_to_string = function
       | V Digestif.SHA1 -> "sha1"

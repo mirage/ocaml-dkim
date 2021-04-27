@@ -1,4 +1,4 @@
-type algorithm = RSA | Algorithm_ext of string
+type algorithm = RSA | ED25519 | Algorithm_ext of string
 
 type hash = SHA1 | SHA256 | Hash_ext of string
 
@@ -36,6 +36,7 @@ type server_version = string
 
 let pp_algorithm ppf = function
   | RSA -> Fmt.string ppf "rsa"
+  | ED25519 -> Fmt.string ppf "ed25519"
   | Algorithm_ext x -> Fmt.string ppf x
 
 let pp_hash ppf = function
