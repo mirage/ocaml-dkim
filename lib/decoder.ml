@@ -365,7 +365,8 @@ let mail_tag_list =
       many (char ';' *> tag_spec)
       <* option () (char ';' *> return ())
       >>| List.fold_left
-            (fun hmap -> function Some (Map.B (k, v)) -> Map.add k v hmap
+            (fun hmap -> function
+              | Some (Map.B (k, v)) -> Map.add k v hmap
               | None -> hmap)
             (Map.singleton k v)
   | None -> failf "Expect at least one tag"
@@ -433,7 +434,8 @@ let server_tag_list =
       many (char ';' *> tag_spec)
       <* option () (char ';' *> return ())
       >>| List.fold_left
-            (fun hmap -> function Some (Map.B (k, v)) -> Map.add k v hmap
+            (fun hmap -> function
+              | Some (Map.B (k, v)) -> Map.add k v hmap
               | None -> hmap)
             (Map.singleton k v)
   | None -> failf "Expect at least one tag"
