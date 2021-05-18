@@ -123,8 +123,7 @@ let extract_dkim :
    (* XXX(dinosaure): be aware about [lwt] implementaton if you
       change this value. *)
    let raw = Bytes.create chunk in
-   let buffer = Bigstringaf.create (2 * chunk) in
-   let decoder = Hd.decoder ~p buffer in
+   let decoder = Hd.decoder p in
    let rec go others acc =
      match Hd.decode decoder with
      | `Field field -> (
@@ -162,12 +161,11 @@ let extract_dkim :
                 fields = List.rev others;
                 dkim_fields = List.rev acc;
               })
-     | `Await -> (
+     | `Await ->
          Flow.input flow raw 0 (Bytes.length raw) >>= fun len ->
          let raw = sanitize_input newline raw len in
-         match Hd.src decoder raw 0 (String.length raw) with
-         | Ok () -> go others acc
-         | Error _ as err -> return err) in
+         Hd.src decoder raw 0 (String.length raw) ;
+         go others acc in
    go [] []
 
 type whash = V : 'k Digestif.hash -> whash
@@ -991,8 +989,7 @@ let sign :
   let ( >>= ) = bind in
   let chunk = 0x1000 in
   let raw = Bytes.create chunk in
-  let buffer = Bigstringaf.create (2 * chunk) in
-  let decoder = Hd.decoder ~p buffer in
+  let decoder = Hd.decoder p in
   let rec go fields =
     match Hd.decode decoder with
     | `Field field -> (
@@ -1006,12 +1003,11 @@ let sign :
         | _ -> assert false)
     | `Malformed err -> Fmt.invalid_arg "Invalid e-mail: %s" err
     | `End rest -> return (rest, fields)
-    | `Await -> (
+    | `Await ->
         Flow.input flow raw 0 (Bytes.length raw) >>= fun len ->
         let raw = sanitize_input newline raw len in
-        match Hd.src decoder raw 0 (String.length raw) with
-        | Ok () -> go fields
-        | Error (`Msg err) -> Fmt.invalid_arg "Invalid e-mail: %s" err) in
+        Hd.src decoder raw 0 (String.length raw) ;
+        go fields in
   go [] >>= fun (prelude, fields) ->
   let _ =
     List.fold_left
