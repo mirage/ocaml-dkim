@@ -188,3 +188,5 @@ val relaxed_field_canonicalization :
   Mrmime.Field_name.t -> Unstrctrd.t -> (string -> unit) -> unit
 
 module Body = Body
+
+val parse_dkim_field_value : Unstrctrd.t -> (map, [> `Msg of string ]) result
