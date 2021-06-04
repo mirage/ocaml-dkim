@@ -281,7 +281,7 @@ let i =
   let tag_name = string "i" >>| fun _ -> Map.K.i in
   let tag_value =
     option None (local_part >>| Option.some) >>= fun local ->
-    char '*' *> domain_name >>= fun domain -> return { Value.local; domain }
+    char '@' *> domain_name >>= fun domain -> return { Value.local; domain }
   in
   tag_spec ~tag_name ~tag_value >>| binding
 
