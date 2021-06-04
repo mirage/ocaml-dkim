@@ -1,5 +1,7 @@
 let () = Mirage_crypto_rng_unix.initialize ()
 
+let ( <.> ) f g x = f (g x)
+
 let reporter ppf =
   let report src level ~over k msgf =
     let k _ =
@@ -36,6 +38,13 @@ let google__domainkey_janestreet_com =
   "v=DKIM1; k=rsa; \
    p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDZr8DcbuZ/BsBrNh7kyYIM6tO3Z4P3UQKuyKSN9nFmPlCmkYu7A6zm+069O3iwNUvyHwk+n67KyNzA6mC4B4/x/NHZ1gr6rXJoAha4ORxNPPpxUWKfYsCwnaSP9c8HgWOw4HigJReR5G1kiamGL+4BNy/WknWxT04E6I3c+KEOIQIDAQAB"
 
+let sjc2__domainkey_discoursemail_com =
+  [
+    "v=DKIM1; k=rsa; \
+     p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsTING4yp/RLlN2i+FnLNo1YJ3SQPvs9fAYIS+ykQRX/TZj0OEfrM9WtZLmy+5CwWQWYlJguWY6Fz02wmIdunxBfZ3bgd5NJHQBN76DIaNfiyLUudbYP5vdrcJG5TwymZ03TVtRtfpqocvKU7X/o9GQiTgeTKRRajK6CBirinlINTXnrwJOA6ZQ1A02SDHAAf/";
+    "B+rSYQ3mx9vAd8JlXdD7sIFaWK4Sz3YPad6M4d1p+FWrZ94D0Z6RFPzl/Q+AN5QnVAyjCjVqaQ+QQoUW3TYFc7uaKwbDaATpPOadz7lXNqr9C+i4DNWSU+Lff48e9WQ6tt+MZTJWeaZtL8g9OfBdwIDAQAB";
+  ]
+
 let seed = Base64.decode_exn "Do8KdmOYnU7yzqDn3A3lJwwXPaa1NRdv6E9R2KgZyXg="
 
 let priv_of_seed =
@@ -44,7 +53,13 @@ let priv_of_seed =
     Mirage_crypto_rng.(create ~seed (module Fortuna)) in
   Mirage_crypto_pk.Rsa.generate ~g ~bits:2048 ()
 
-let mails = [ (2, "raw/001.mail"); (1, "raw/002.mail"); (1, "raw/003.mail") ]
+let mails =
+  [
+    (2, "raw/001.mail");
+    (1, "raw/002.mail");
+    (1, "raw/003.mail");
+    (1, "raw/004.mail");
+  ]
 
 module Unix_scheduler = Dkim.Sigs.Make (struct
   type +'a t = 'a
@@ -82,6 +97,8 @@ module Fake_resolver = struct
         Unix_scheduler.inj (Ok [ pf2014__domainkey_github_com ])
     | [ "google"; "_domainkey"; "janestreet"; "com" ], _ ->
         Unix_scheduler.inj (Ok [ google__domainkey_janestreet_com ])
+    | [ "sjc2"; "_domainkey"; "discoursemail"; "com" ], _ ->
+        Unix_scheduler.inj (Ok sjc2__domainkey_discoursemail_com)
     | _, Some (domain_name', extra)
       when Domain_name.equal domain_name domain_name' ->
         let str = Dkim.server_to_string extra in
@@ -105,6 +122,8 @@ let unzip l =
     | [] -> (List.rev ra, List.rev rb)
     | (a, b) :: r -> go (a :: ra, b :: rb) r in
   go ([], []) l
+
+let epoch = Int64.of_float <.> Unix.gettimeofday
 
 let verify dns ic =
   let errors = ref [] in
@@ -150,8 +169,8 @@ let verify dns ic =
         List.map2
           (fun (raw_field_dkim, raw_dkim, dkim) server_key ->
             ( Dkim.domain dkim,
-              Dkim.verify extracted.Dkim.fields (raw_field_dkim, raw_dkim) dkim
-                server_key body ))
+              Dkim.verify ~epoch extracted.Dkim.fields
+                (raw_field_dkim, raw_dkim) dkim server_key body ))
           dkim_fields server_keys in
 
       match !errors with
@@ -177,8 +196,6 @@ let test_verify (trust, filename) =
           Alcotest.(check bool) (Domain_name.to_string domain) res true)
         rs
   | Error (`Msg err) -> Alcotest.fail err
-
-let ( <.> ) f g x = f (g x)
 
 let test_sign (trust, filename) =
   Alcotest.test_case filename `Quick @@ fun () ->

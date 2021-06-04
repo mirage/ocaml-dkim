@@ -90,7 +90,14 @@ val extract_body :
     with [prelude] and with [flow], [state], [(module Flow)] and [?newline]
     arguments. It returns a {!body} which can be used by {!verify}. *)
 
+val expired : epoch:(unit -> int64) -> signed dkim -> bool
+(** [expired ~epoch dkim] returns [true] if the signature is expired. [verify]
+    with the given [dkim] will returns [true] but it does not process the real
+    verification, which will obviously fails otherwise due to the obsolete
+    public/private key available by the signer. *)
+
 val verify :
+  epoch:(unit -> int64) ->
   (Mrmime.Field_name.t * Unstrctrd.t) list ->
   Mrmime.Field_name.t * Unstrctrd.t ->
   signed dkim ->
