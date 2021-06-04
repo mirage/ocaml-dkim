@@ -65,6 +65,7 @@ module Make
     (R : Mirage_random.S)
     (T : Mirage_time.S)
     (C : Mirage_clock.MCLOCK)
+    (P : Mirage_clock.PCLOCK)
     (S : Mirage_stack.V4V6) =
 struct
   module DNS = struct
@@ -88,6 +89,10 @@ struct
       | x :: r -> f a x >>= fun a -> go a r in
     go a l
 
+  let epoch () =
+    let d, _ps = P.now_d_ps () in
+    Int64.of_int d
+
   let verify ?newline ?size ?nameserver ?timeout stream stack =
     let flow = Flow.of_stream stream in
     let dns = DNS.create ?size ?nameserver ?timeout stack in
@@ -105,7 +110,7 @@ struct
       fiber >>= function
       | Error _ -> return (valid, invalid)
       | Ok (dkim, server) -> (
-          Dkim.verify extracted.fields
+          Dkim.verify ~epoch extracted.fields
             (dkim_field_name, dkim_field_value)
             dkim server body
           |> return

@@ -208,6 +208,8 @@ type 'signature dkim = {
   signature : 'signature;
 }
 
+let expire { t; _ } = t
+
 let fields { h; _ } = h
 
 type algorithm = [ `RSA ]
@@ -856,52 +858,61 @@ let verify_body dkim body =
       Digestif.equal k v v'
   | None -> false
 
-let verify fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t) dkim
-    server body =
-  let (H (k, hash)) = data_hash_of_dkim fields dkim_signature dkim in
-  Log.debug (fun m ->
-      m "Hash of fields: %a." (pp_signature (V k)) (H (k, hash))) ;
-  (* DER-encoded X.509 RSAPublicKey. *)
-  let hashp a =
-    match (a, k) with
-    | `SHA1, Digestif.SHA1 -> true
-    | `SHA224, Digestif.SHA224 -> true
-    | `SHA256, Digestif.SHA256 -> true
-    | `SHA384, Digestif.SHA384 -> true
-    | `SHA512, Digestif.SHA512 -> true
-    | `MD5, Digestif.MD5 -> true
-    | _, _ -> false in
+let expired ~epoch dkim =
+  Option.fold ~none:false ~some:(( >= ) (epoch ())) (expire dkim)
 
-  match
-    (X509.Public_key.decode_der (Cstruct.of_string server.p), fst dkim.a)
-  with
-  | Ok (`RSA key), Value.RSA ->
-      let digest = `Digest (Cstruct.of_string (Digestif.to_raw_string k hash)) in
-      let r0 =
-        let b, _ = dkim.signature in
-        Mirage_crypto_pk.Rsa.PKCS1.verify ~hashp ~key
-          ~signature:(Cstruct.of_string b) digest in
-      Log.debug (fun m -> m "Header fields verified: %b." r0) ;
-      let r1 = verify_body dkim body in
-      Log.debug (fun m -> m "Body verified: %b." r1) ;
+let verify ~epoch fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t)
+    dkim server body =
+  if expired ~epoch dkim
+  then (
+    Log.warn (fun m -> m "The given DKIM-Signature expired.") ;
+    true (* XXX(dinosaure): check if the signature is not expired. *))
+  else
+    let (H (k, hash)) = data_hash_of_dkim fields dkim_signature dkim in
+    Log.debug (fun m ->
+        m "Hash of fields: %a." (pp_signature (V k)) (H (k, hash))) ;
+    (* DER-encoded X.509 RSAPublicKey. *)
+    let hashp a =
+      match (a, k) with
+      | `SHA1, Digestif.SHA1 -> true
+      | `SHA224, Digestif.SHA224 -> true
+      | `SHA256, Digestif.SHA256 -> true
+      | `SHA384, Digestif.SHA384 -> true
+      | `SHA512, Digestif.SHA512 -> true
+      | `MD5, Digestif.MD5 -> true
+      | _, _ -> false in
 
-      r0 && r1
-  | Ok (`ED25519 key), Value.ED25519 ->
-      let msg = Cstruct.of_string (Digestif.to_raw_string k hash) in
-      let r0 =
-        let b, _ = dkim.signature in
-        Mirage_crypto_ec.Ed25519.verify ~key (Cstruct.of_string b) ~msg in
-      Log.debug (fun m -> m "Header fields verified: %b." r0) ;
-      let r1 = verify_body dkim body in
-      Log.debug (fun m -> m "Body verified: %b." r1) ;
+    match
+      (X509.Public_key.decode_der (Cstruct.of_string server.p), fst dkim.a)
+    with
+    | Ok (`RSA key), Value.RSA ->
+        let digest =
+          `Digest (Cstruct.of_string (Digestif.to_raw_string k hash)) in
+        let r0 =
+          let b, _ = dkim.signature in
+          Mirage_crypto_pk.Rsa.PKCS1.verify ~hashp ~key
+            ~signature:(Cstruct.of_string b) digest in
+        Log.debug (fun m -> m "Header fields verified: %b." r0) ;
+        let r1 = verify_body dkim body in
+        Log.debug (fun m -> m "Body verified: %b." r1) ;
 
-      r0 && r1
-  | Ok _, _ ->
-      Log.err (fun m -> m "We handle only RSA & ED25519 algorithms.") ;
-      false
-  | Error (`Msg err), _ ->
-      Log.err (fun m -> m "Invalid DER-encoded X.509 RSA public-key: %s" err) ;
-      false
+        r0 && r1
+    | Ok (`ED25519 key), Value.ED25519 ->
+        let msg = Cstruct.of_string (Digestif.to_raw_string k hash) in
+        let r0 =
+          let b, _ = dkim.signature in
+          Mirage_crypto_ec.Ed25519.verify ~key (Cstruct.of_string b) ~msg in
+        Log.debug (fun m -> m "Header fields verified: %b." r0) ;
+        let r1 = verify_body dkim body in
+        Log.debug (fun m -> m "Body verified: %b." r1) ;
+
+        r0 && r1
+    | Ok _, _ ->
+        Log.err (fun m -> m "We handle only RSA & ED25519 algorithms.") ;
+        false
+    | Error (`Msg err), _ ->
+        Log.err (fun m -> m "Invalid DER-encoded X.509 RSA public-key: %s" err) ;
+        false
 
 let dkim_field_and_value =
   let open Angstrom in

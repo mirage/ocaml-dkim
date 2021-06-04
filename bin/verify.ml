@@ -50,6 +50,8 @@ end
 
 let ( <.> ) f g x = f (g x)
 
+let epoch = Int64.of_float <.> Unix.gettimeofday
+
 let show_result ~valid:v_valid ~invalid:v_invalid =
   let valid dkim =
     Fmt.pr "[%a]: %a\n%!"
@@ -96,7 +98,7 @@ let run quiet src newline nameserver =
     match Unix_scheduler.prj fiber with
     | Ok (dkim, server) ->
         let correct =
-          Dkim.verify extracted.Dkim.fields
+          Dkim.verify ~epoch extracted.Dkim.fields
             (dkim_field_name, dkim_field_value)
             dkim server body in
         if correct then (dkim :: valid, invalid) else (valid, dkim :: invalid)
