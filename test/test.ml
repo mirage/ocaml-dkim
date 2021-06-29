@@ -125,6 +125,11 @@ let unzip l =
 
 let epoch = Int64.of_float <.> Unix.gettimeofday
 
+let stream_of_queue q () =
+  match Queue.pop q with
+  | v -> Unix_scheduler.inj (Some v)
+  | exception _ -> Unix_scheduler.inj None
+
 let verify dns ic =
   let errors = ref [] in
 
@@ -140,11 +145,15 @@ let verify dns ic =
                 errors := `Dkim_field raw :: !errors ;
                 a)
           [] extracted.Dkim.dkim_fields in
-      let body =
+      let s = Queue.create () in
+      let r = Queue.create () in
+      let (`Consume th) =
         Dkim.extract_body ic unix
           (module Caml_flow)
-          ~prelude:extracted.Dkim.prelude in
-      let body = Unix_scheduler.prj body in
+          ~prelude:extracted.Dkim.prelude
+          ~simple:(function Some v -> Queue.push v s | None -> ())
+          ~relaxed:(function Some v -> Queue.push v r | None -> ()) in
+      let () = Unix_scheduler.prj th in
 
       let server_keys =
         List.map
@@ -169,8 +178,11 @@ let verify dns ic =
         List.map2
           (fun (raw_field_dkim, raw_dkim, dkim) server_key ->
             ( Dkim.domain dkim,
-              Dkim.verify ~epoch extracted.Dkim.fields
-                (raw_field_dkim, raw_dkim) dkim server_key body ))
+              Dkim.verify unix ~epoch extracted.Dkim.fields
+                ~simple:(stream_of_queue (Queue.copy s))
+                ~relaxed:(stream_of_queue (Queue.copy r))
+                (raw_field_dkim, raw_dkim) dkim server_key
+              |> Unix_scheduler.prj ))
           dkim_fields server_keys in
 
       match !errors with
@@ -197,6 +209,26 @@ let test_verify (trust, filename) =
         rs
   | Error (`Msg err) -> Alcotest.fail err
 
+module Caml_stream = struct
+  type 'a t = 'a Queue.t
+
+  type backend = Unix_scheduler.t
+
+  let create () =
+    let q = Queue.create () in
+    let push = function Some v -> Queue.push v q | None -> () in
+    (q, push)
+
+  let get q =
+    match Queue.pop q with
+    | v -> Unix_scheduler.inj (Some v)
+    | exception _ -> Unix_scheduler.inj None
+end
+
+let both =
+  let open Unix_scheduler in
+  { Dkim.Sigs.f = (fun a b -> inj (prj a, prj b)) }
+
 let test_sign (trust, filename) =
   Alcotest.test_case filename `Quick @@ fun () ->
   let ic = open_in filename in
@@ -204,7 +236,10 @@ let test_sign (trust, filename) =
   let dkim = Dkim.v ~selector:(Domain_name.of_string_exn "admin") x25519 in
   let dkim =
     Unix_scheduler.prj
-      (Dkim.sign ~key:priv_of_seed ic unix (module Caml_flow) dkim) in
+      (Dkim.sign ~key:priv_of_seed ic unix ~both
+         (module Caml_flow)
+         (module Caml_stream)
+         dkim) in
   let oc = open_out (filename ^ ".signed") in
   seek_in ic 0 ;
   output_string oc (Prettym.to_string ~new_line:"\n" Dkim.Encoder.as_field dkim) ;
