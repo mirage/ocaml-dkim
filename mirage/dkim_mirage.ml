@@ -52,8 +52,6 @@ let return x = Lwt_scheduler.inj (Lwt.return x)
 
 let ( >>= ) x f = bind x f
 
-let ( >>| ) x f = x >>= (return <.> f)
-
 let ( >>? ) x f =
   x >>= function
   | Ok x -> f x
@@ -83,41 +81,105 @@ struct
       Lwt_scheduler.inj (getaddrinfo dns `TXT domain_name)
   end
 
-  let fold_left_s ~f a l =
-    let rec go a = function
-      | [] -> return a
-      | x :: r -> f a x >>= fun a -> go a r in
-    go a l
-
   let epoch () =
     let d, _ps = P.now_d_ps () in
     Int64.of_int d
 
+  let consumer_of_stream stream () = Lwt_scheduler.inj (Lwt_stream.get stream)
+
+  let rec drain stream =
+    let open Lwt.Infix in
+    Lwt_stream.get stream >>= function
+    | Some _ -> drain stream
+    | None -> Lwt.return_unit
+
+  let is_not_errored = function
+    | `Errored -> Lwt.return false
+    | _ -> Lwt.return true
+
+  let is_valid = function `Valid _ -> Lwt.return true | _ -> Lwt.return false
+
+  (* XXX(dinosaure): this version is able to verify multiple DKIM fields
+   * with a bounded stream according to the incoming stream. The trick is
+   * to clone [simple] and [relaxed] bounded streams to all DKIM fields
+   * and consume all of them concurrently with the consumer of the incoming
+   * stream. By this way, we are able to verify an email in one pass!
+   *
+   * As far as I can tell, such pattern for DKIM does not exist. *)
+
   let verify ?newline ?size ?nameserver ?timeout stream stack =
     let flow = Flow.of_stream stream in
     let dns = DNS.create ?size ?nameserver ?timeout stack in
+    let q = Queue.create () in
     Dkim.extract_dkim ?newline flow lwt (module Flow) >>? fun extracted ->
-    Dkim.extract_body ?newline flow lwt
-      (module Flow)
-      ~prelude:extracted.Dkim.prelude
-    >>= fun body ->
-    let f (valid, invalid) (dkim_field_name, dkim_field_value, m) =
+    let f (dkim_field_name, dkim_field_value, m, s, r) =
       let fiber =
         Dkim.post_process_dkim m |> return >>? fun dkim ->
         Dkim.extract_server dns lwt (module DNS) dkim >>? fun n ->
         Dkim.post_process_server n |> return >>? fun server ->
         return (Ok (dkim, server)) in
       fiber >>= function
-      | Error _ -> return (valid, invalid)
+      | Error _ -> Lwt_scheduler.inj (Lwt.return `Errored)
       | Ok (dkim, server) -> (
-          Dkim.verify ~epoch extracted.fields
+          Dkim.verify lwt ~epoch extracted.fields
             (dkim_field_name, dkim_field_value)
-            dkim server body
-          |> return
+            ~simple:(consumer_of_stream s) ~relaxed:(consumer_of_stream r) dkim
+            server
           >>= function
-          | true -> return (dkim :: valid, invalid)
-          | false -> return (valid, dkim :: invalid)) in
-    fold_left_s ~f ([], []) extracted.dkim_fields >>| Rresult.R.ok
+          | true -> return (`Valid dkim)
+          | false -> return (`Invalid dkim)) in
+    let s_emitter x = Queue.push (`Simple x) q in
+    let r_emitter x = Queue.push (`Relaxed x) q in
+    let s, s_bounded = Lwt_stream.create_bounded 10 in
+    let r, r_bounded = Lwt_stream.create_bounded 10 in
+    let clone (dkim_field_name, dkim_field_value, m) =
+      ( dkim_field_name,
+        dkim_field_value,
+        m,
+        Lwt_stream.clone s,
+        Lwt_stream.clone r ) in
+    let dkim_fields = List.map clone extracted.dkim_fields in
+    let (`Consume th) =
+      Dkim.extract_body ?newline flow lwt
+        (module Flow)
+        ~prelude:extracted.Dkim.prelude ~simple:s_emitter ~relaxed:r_emitter
+    in
+    let rec consume () =
+      match Queue.pop q with
+      | `Simple (Some s) -> s_bounded#push s |> Lwt_scheduler.inj >>= consume
+      | `Relaxed (Some s) -> r_bounded#push s |> Lwt_scheduler.inj >>= consume
+      | `Simple None ->
+          s_bounded#close ;
+          if s_bounded#closed && r_bounded#closed
+          then Lwt_scheduler.inj Lwt.return_unit
+          else consume ()
+      | `Relaxed None ->
+          r_bounded#close ;
+          if s_bounded#closed && r_bounded#closed
+          then Lwt_scheduler.inj Lwt.return_unit
+          else consume ()
+      | exception Queue.Empty -> consume () in
+    let fiber =
+      let open Lwt.Infix in
+      Lwt.both
+        (Lwt.join
+           [
+             Lwt_scheduler.prj th;
+             Lwt_scheduler.prj (consume ());
+             drain s;
+             drain r;
+           ])
+        (Lwt_list.map_p (Lwt_scheduler.prj <.> f) dkim_fields)
+      >>= fun ((), results) ->
+      Lwt_list.filter_p is_not_errored results >>= fun results ->
+      Lwt_list.partition_p is_valid results in
+    Lwt_scheduler.inj fiber >>= fun (valids, invalids) ->
+    let valids =
+      List.map (function `Valid dkim -> dkim | _ -> assert false) valids in
+    let invalids =
+      List.map (function `Invalid dkim -> dkim | _ -> assert false) invalids
+    in
+    return (Ok (valids, invalids))
 
   let verify ?newline ?size ?nameserver ?timeout stream stack =
     Lwt_scheduler.prj (verify ?newline ?size ?nameserver ?timeout stream stack)
@@ -169,11 +231,25 @@ module Flow_with_stream = struct
       Lwt_scheduler.inj fiber
 end
 
+module Stream = struct
+  type 'a t = 'a Lwt_stream.t
+
+  type backend = Lwt_scheduler.t
+
+  let create () = Lwt_stream.create ()
+
+  let get stream = Lwt_scheduler.inj (Lwt_stream.get stream)
+end
+
 let sign ~key ?(newline = Dkim.LF) stream dkim =
   let open Lwt.Infix in
   let flow, mail_stream = Flow_with_stream.of_stream stream in
+  let both a b = Lwt_scheduler.(inj (Lwt.both (prj a) (prj b))) in
   Lwt_scheduler.prj
-    (Dkim.sign ~key ~newline flow lwt (module Flow_with_stream) dkim)
+    (Dkim.sign ~key ~newline flow lwt ~both:{ Dkim.Sigs.f = both }
+       (module Flow_with_stream)
+       (module Stream)
+       dkim)
   >>= fun dkim ->
   let new_line = match newline with Dkim.LF -> "\n" | Dkim.CRLF -> "\r\n" in
   let stream = Prettym.to_stream ~new_line Dkim.Encoder.as_field dkim in

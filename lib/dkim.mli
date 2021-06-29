@@ -84,7 +84,9 @@ val extract_body :
   'backend Sigs.state ->
   (module Sigs.FLOW with type flow = 'flow and type backend = 'backend) ->
   prelude:string ->
-  (body, 'backend) Sigs.io
+  simple:(string option -> unit) ->
+  relaxed:(string option -> unit) ->
+  [ `Consume of (unit, 'backend) Sigs.io ]
 (** [extract_body ?newline flow state (module Flow) ~prelude] extracts a thin
     representation of the body of the email. It should follow {!extract_dkim}
     with [prelude] and with [flow], [state], [(module Flow)] and [?newline]
@@ -96,14 +98,18 @@ val expired : epoch:(unit -> int64) -> signed dkim -> bool
     verification, which will obviously fails otherwise due to the obsolete
     public/private key available by the signer. *)
 
+type ('a, 'backend) stream = unit -> ('a option, 'backend) Sigs.io
+
 val verify :
+  'backend Sigs.state ->
   epoch:(unit -> int64) ->
   (Mrmime.Field_name.t * Unstrctrd.t) list ->
   Mrmime.Field_name.t * Unstrctrd.t ->
+  simple:(string, 'backend) stream ->
+  relaxed:(string, 'backend) stream ->
   signed dkim ->
   server ->
-  body ->
-  bool
+  (bool, 'backend) Sigs.io
 (** [verify fields (dkim_field_name, dkim_value) dkim server body] verifies the
     given email (represented by {!body}. [fields] and
     [(dkim_field_name, dkim_value)]) with a signature {!dkim} and the public-key
@@ -155,7 +161,9 @@ val sign :
   ?newline:newline ->
   'flow ->
   't Sigs.state ->
+  both:'t Sigs.both ->
   (module Sigs.FLOW with type flow = 'flow and type backend = 't) ->
+  (module Sigs.STREAM with type backend = 't) ->
   unsigned dkim ->
   (signed dkim, 't) Sigs.io
 (** [sign ~key ~newline flow state (module Flow) dkim] returns a signed {!dkim}

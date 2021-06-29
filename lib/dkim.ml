@@ -653,7 +653,7 @@ let crlf digest n =
   let rec go = function
     | 0 -> ()
     | n ->
-        digest "\r\n" ;
+        digest (Some "\r\n") ;
         go (pred n) in
   if n < 0 then Fmt.invalid_arg "Expect at least 0 <crlf>" else go n
 
@@ -668,20 +668,18 @@ let extract_body :
     backend state ->
     (module FLOW with type flow = flow and type backend = backend) ->
     prelude:string ->
-    (body, backend) io =
+    simple:(string option -> unit) ->
+    relaxed:(string option -> unit) ->
+    [ `Consume of (unit, backend) io ] =
  fun ?(newline = LF) (type flow backend) (flow : flow) (state : backend state)
      (module Flow : FLOW with type flow = flow and type backend = backend)
-     ~prelude ->
+     ~prelude ~simple ~relaxed ->
   let ( >>= ) = state.bind in
   let return = state.return in
 
   let decoder = Body.decoder () in
   let chunk = 0x1000 in
   let raw = Bytes.create (max chunk (String.length prelude)) in
-  let qr = Queue.create () in
-  let qs = Queue.create () in
-  let fr x = Queue.push x qr in
-  let fs x = Queue.push x qs in
 
   Bytes.blit_string prelude 0 raw 0 (String.length prelude) ;
 
@@ -690,12 +688,12 @@ let extract_body :
   let digest_stack ?(relaxed = false) f l =
     let rec go = function
       | [] -> ()
-      | [ `Spaces x ] -> f (if relaxed then " " else x)
+      | [ `Spaces x ] -> f (Some (if relaxed then " " else x))
       | `CRLF :: r ->
-          f "\r\n" ;
+          f (Some "\r\n") ;
           go r
       | `Spaces x :: r ->
-          if not relaxed then f x ;
+          if not relaxed then f (Some x) ;
           go r in
     go (List.rev l) in
   let rec go stack =
@@ -706,24 +704,24 @@ let extract_body :
         Body.src decoder (Bytes.of_string raw) 0 (String.length raw) ;
         go stack
     | `End ->
-        crlf fr 1 ;
-        crlf fs 1 ;
+        crlf relaxed 1 ;
+        crlf simple 1 ;
         return ()
     | `Spaces _ as x -> go (x :: stack)
     | `CRLF -> go (`CRLF :: stack)
     | `Data x ->
-        digest_stack ~relaxed:true fr stack ;
-        fr x ;
-        digest_stack fs stack ;
-        fs x ;
+        digest_stack ~relaxed:true relaxed stack ;
+        relaxed (Some x) ;
+        digest_stack simple stack ;
+        simple (Some x) ;
         go [] in
   Body.src decoder raw 0 (String.length prelude) ;
-  go [] >>= fun () ->
-  return
-    {
-      relaxed = (fun f -> Queue.iter f qr);
-      simple = (fun f -> Queue.iter f qs);
-    }
+  `Consume (go [])
+(* return
+   {
+     relaxed = (fun f -> Queue.iter f qr);
+     simple = (fun f -> Queue.iter f qs);
+   } *)
 
 (* XXX(dinosaure): seriously, going to hell DKIM! From [dkimpy]:
    re.compile(br[\s]b'+FWS+br'=) (?:'+FWS+br'[a-zA-Z0-9+/=])*(?:\r?\n\Z)?' this is does
@@ -754,11 +752,42 @@ let remove_signature_of_raw_dkim unstrctrd =
   let res, _ = Unstrctrd.fold ~f:fold ([], `_0) unstrctrd in
   Rresult.R.get_ok (Unstrctrd.of_list (List.rev res))
 
-let body_hash_of_dkim body dkim =
-  let digesti = digesti_of_hash (snd dkim.a) in
+type ('a, 'backend) stream = unit -> ('a option, 'backend) io
+
+let rec fold :
+    type backend.
+    backend state ->
+    f:(string -> 'a -> ('a, backend) io) ->
+    (string, backend) stream ->
+    'a ->
+    ('a, backend) io =
+ fun ({ bind; return } as state) ~f stream acc ->
+  let ( >>= ) = bind in
+  stream () >>= function
+  | Some str -> f str acc >>= fold state ~f stream
+  | None -> return acc
+
+let digest :
+    type backend.
+    backend state -> whash -> (string, backend) stream -> (vhash, backend) io =
+ fun ({ bind; return } as state) (V hash) stream ->
+  let ( >>= ) = bind in
+  let module Digest = (val Digestif.module_of hash) in
+  let f str ctx = return (Digest.feed_string ctx str) in
+  fold state ~f stream Digest.empty >>= fun ctx ->
+  return (H (hash, Digestif.of_digest (module Digest) (Digest.get ctx)))
+
+let body_hash_of_dkim :
+    type backend.
+    backend state ->
+    simple:(string, backend) stream ->
+    relaxed:(string, backend) stream ->
+    _ dkim ->
+    (vhash, backend) io =
+ fun state ~simple ~relaxed dkim ->
   match snd dkim.c with
-  | Value.Simple -> digesti body.simple
-  | Value.Relaxed -> digesti body.relaxed
+  | Value.Simple -> digest state (snd dkim.a) simple
+  | Value.Relaxed -> digest state (snd dkim.a) relaxed
   | Value.Canonicalization_ext x ->
       Fmt.invalid_arg "%s canonicalisation is not supported" x
 
@@ -847,26 +876,28 @@ let data_hash_of_dkim fields ((field_dkim : Mrmime.Field_name.t), raw_dkim) dkim
   dkim_field_canonicalization field_dkim raw_dkim (fun x -> Queue.push x q) ;
   digesti (fun f -> Queue.iter f q)
 
-let verify_body dkim body =
-  let (H (k, v)) = body_hash_of_dkim body dkim in
+let verify_body ({ bind; return } as state) ~simple ~relaxed dkim =
+  let ( >>= ) = bind in
+  body_hash_of_dkim state ~simple ~relaxed dkim >>= fun (H (k, v)) ->
   let (H (k', v')) = expected dkim in
   match equal_hash k k' with
   | Some Refl.Refl ->
       Log.debug (fun m ->
           m "Hash of body (expect: %a): %a." (Digestif.pp k) v' (Digestif.pp k)
             v) ;
-      Digestif.equal k v v'
-  | None -> false
+      return (Digestif.equal k v v')
+  | None -> return false
 
 let expired ~epoch dkim =
   Option.fold ~none:false ~some:(( >= ) (epoch ())) (expire dkim)
 
-let verify ~epoch fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t)
-    dkim server body =
+let verify ({ bind; return } as state) ~epoch fields
+    (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t) ~simple ~relaxed dkim
+    server =
   if expired ~epoch dkim
   then (
     Log.warn (fun m -> m "The given DKIM-Signature expired.") ;
-    true (* XXX(dinosaure): check if the signature is not expired. *))
+    return true (* XXX(dinosaure): check if the signature is not expired. *))
   else
     let (H (k, hash)) = data_hash_of_dkim fields dkim_signature dkim in
     Log.debug (fun m ->
@@ -881,6 +912,7 @@ let verify ~epoch fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t)
       | `SHA512, Digestif.SHA512 -> true
       | `MD5, Digestif.MD5 -> true
       | _, _ -> false in
+    let ( >>= ) = bind in
 
     match
       (X509.Public_key.decode_der (Cstruct.of_string server.p), fst dkim.a)
@@ -893,26 +925,24 @@ let verify ~epoch fields (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t)
           Mirage_crypto_pk.Rsa.PKCS1.verify ~hashp ~key
             ~signature:(Cstruct.of_string b) digest in
         Log.debug (fun m -> m "Header fields verified: %b." r0) ;
-        let r1 = verify_body dkim body in
+        verify_body state ~simple ~relaxed dkim >>= fun r1 ->
         Log.debug (fun m -> m "Body verified: %b." r1) ;
-
-        r0 && r1
+        return (r0 && r1)
     | Ok (`ED25519 key), Value.ED25519 ->
         let msg = Cstruct.of_string (Digestif.to_raw_string k hash) in
         let r0 =
           let b, _ = dkim.signature in
           Mirage_crypto_ec.Ed25519.verify ~key (Cstruct.of_string b) ~msg in
         Log.debug (fun m -> m "Header fields verified: %b." r0) ;
-        let r1 = verify_body dkim body in
+        verify_body state ~simple ~relaxed dkim >>= fun r1 ->
         Log.debug (fun m -> m "Body verified: %b." r1) ;
-
-        r0 && r1
+        return (r0 && r1)
     | Ok _, _ ->
         Log.err (fun m -> m "We handle only RSA & ED25519 algorithms.") ;
-        false
+        return false
     | Error (`Msg err), _ ->
         Log.err (fun m -> m "Invalid DER-encoded X.509 RSA public-key: %s" err) ;
-        false
+        return false
 
 let dkim_field_and_value =
   let open Angstrom in
@@ -983,10 +1013,13 @@ let sign :
     ?newline:newline ->
     flow ->
     backend state ->
+    both:backend both ->
     (module FLOW with type flow = flow and type backend = backend) ->
+    (module STREAM with type backend = backend) ->
     unsigned dkim ->
     (signed dkim, backend) io =
- fun ~key ?(newline = LF) flow ({ bind; return } as state) (module Flow) dkim ->
+ fun ~key ?(newline = LF) flow ({ bind; return } as state) ~both:{ f = both }
+     (module Flow) (module Stream) dkim ->
   let digesti = digesti_of_hash (snd dkim.a) in
   let canon =
     match fst dkim.c with
@@ -994,7 +1027,6 @@ let sign :
     | Value.Relaxed -> relaxed_field_canonicalization
     | Value.Canonicalization_ext x ->
         Fmt.invalid_arg "%s canonicalisation is not supported" x in
-  let q = Queue.create () in
 
   let open Mrmime in
   let ( >>= ) = bind in
@@ -1020,6 +1052,7 @@ let sign :
         Hd.src decoder raw 0 (String.length raw) ;
         go fields in
   go [] >>= fun (prelude, fields) ->
+  let q = Queue.create () in
   let _ =
     List.fold_left
       (fun fields requested ->
@@ -1029,27 +1062,30 @@ let sign :
             remove_assoc field_name fields
         | None -> fields)
       fields dkim.h in
-  extract_body ~newline flow state (module Flow) ~prelude >>= fun body ->
-  let bh =
-    match snd dkim.c with
-    | Value.Simple -> digesti body.simple
-    | Value.Relaxed -> digesti body.relaxed
+  let simple, fs = Stream.create () in
+  let relaxed, fr = Stream.create () in
+  let (`Consume th) =
+    extract_body ~newline flow state
+      (module Flow)
+      ~prelude ~simple:fs ~relaxed:fr in
+  both th
+    (body_hash_of_dkim state
+       ~simple:(fun () -> Stream.get simple)
+       ~relaxed:(fun () -> Stream.get relaxed)
+       dkim)
+  >>= fun ((), bh) ->
+  let dkim' = { dkim with signature = ("", bh) } in
+  let canon =
+    match fst dkim.c with
+    | Value.Simple -> simple_dkim_field_canonicalization
+    | Value.Relaxed -> relaxed_dkim_field_canonicalization
     | Value.Canonicalization_ext x ->
         Fmt.invalid_arg "%s canonicalisation is not supported" x in
-  let dkim' = { dkim with signature = ("", bh) } in
-  let () =
-    let canon =
-      match fst dkim.c with
-      | Value.Simple -> simple_dkim_field_canonicalization
-      | Value.Relaxed -> relaxed_dkim_field_canonicalization
-      | Value.Canonicalization_ext x ->
-          Fmt.invalid_arg "%s canonicalisation is not supported" x in
-    let str = Prettym.to_string ~new_line:"\r\n" Encoder.as_field dkim' in
-    match Angstrom.parse_string ~consume:All dkim_field_and_value str with
-    | Ok unstrctrd ->
-        canon field_dkim_signature unstrctrd (fun x -> Queue.push x q)
-    | Error _ -> assert false
-    (* XXX(dinosaure): must parse! *) in
+  let str = Prettym.to_string ~new_line:"\r\n" Encoder.as_field dkim' in
+  let unstrctrd =
+    Rresult.R.get_ok
+      (Angstrom.parse_string ~consume:All dkim_field_and_value str) in
+  canon field_dkim_signature unstrctrd (fun x -> Queue.push x q) ;
   let (H (k, vhash)) = digesti (fun f -> Queue.iter f q) in
   let message = `Digest (Cstruct.of_string (Digestif.to_raw_string k vhash)) in
   let hash =
