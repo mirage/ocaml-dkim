@@ -69,6 +69,11 @@ let exit_success = 0
 
 let exit_failure = 1
 
+let stream_of_queue q () =
+  match Queue.pop q with
+  | v -> Unix_scheduler.inj (Some v)
+  | exception _ -> Unix_scheduler.inj None
+
 let run quiet src newline nameserver =
   let nameserver =
     match nameserver with
@@ -80,11 +85,15 @@ let run quiet src newline nameserver =
   let open Rresult in
   Unix_scheduler.prj (Dkim.extract_dkim flow unix (module Flow))
   >>= fun extracted ->
-  (R.ok <.> Unix_scheduler.prj)
-    (Dkim.extract_body ~newline flow unix
-       (module Flow)
-       ~prelude:extracted.Dkim.prelude)
-  >>= fun body ->
+  let r = Queue.create () in
+  let s = Queue.create () in
+  let (`Consume th) =
+    Dkim.extract_body ~newline flow unix
+      (module Flow)
+      ~prelude:extracted.Dkim.prelude
+      ~simple:(function Some v -> Queue.push v s | _ -> ())
+      ~relaxed:(function Some v -> Queue.push v r | _ -> ()) in
+  let () = Unix_scheduler.prj th in
   let f (valid, invalid) (dkim_field_name, dkim_field_value, m) =
     let fiber =
       let ( >>= ) = unix.Dkim.Sigs.bind in
@@ -97,10 +106,13 @@ let run quiet src newline nameserver =
       return (Ok (dkim, server)) in
     match Unix_scheduler.prj fiber with
     | Ok (dkim, server) ->
-        let correct =
-          Dkim.verify ~epoch extracted.Dkim.fields
+        let th =
+          Dkim.verify unix ~epoch extracted.Dkim.fields
             (dkim_field_name, dkim_field_value)
-            dkim server body in
+            ~simple:(stream_of_queue (Queue.copy s))
+            ~relaxed:(stream_of_queue (Queue.copy r))
+            dkim server in
+        let correct = Unix_scheduler.prj th in
         if correct then (dkim :: valid, invalid) else (valid, dkim :: invalid)
     | Error _ -> (valid, invalid) in
   let valid, invalid = List.fold_left f ([], []) extracted.Dkim.dkim_fields in

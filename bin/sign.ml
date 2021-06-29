@@ -56,6 +56,28 @@ module Flow = struct
     Unix_scheduler.inj len
 end
 
+module Stream = struct
+  type 'a t = 'a Queue.t
+
+  type backend = Unix_scheduler.t
+
+  let create () =
+    let q = Queue.create () in
+    let push = function Some v -> Queue.push v q | None -> () in
+    (q, push)
+
+  let get q =
+    match Queue.pop q with
+    | v -> Unix_scheduler.inj (Some v)
+    | exception _ -> Unix_scheduler.inj None
+end
+
+let both =
+  let f a b =
+    let open Unix_scheduler in
+    inj (prj a, prj b) in
+  { Dkim.Sigs.f }
+
 let run _ src dst newline private_key seed selector hash canon domain_name =
   match (private_key, seed) with
   | None, None -> `Error (true, "A private key or a seed is required")
@@ -70,7 +92,10 @@ let run _ src dst newline private_key seed selector hash canon domain_name =
       let dkim = Dkim.v ~selector ?hash ?canonicalization:canon domain_name in
       let dkim =
         Unix_scheduler.prj
-          (Dkim.sign ~key ~newline flow unix (module Flow) dkim) in
+          (Dkim.sign ~key ~newline flow unix ~both
+             (module Flow)
+             (module Stream)
+             dkim) in
       match dst with
       | `Output ->
           let new_line =
