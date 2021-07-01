@@ -8,14 +8,13 @@ module Flow = struct
   type backend = Lwt_scheduler.t
 
   type flow = {
-    linger : Bytes.t;
+    linger : bytes;
     mutable pos : int;
     stream : (string * int * int) stream;
   }
 
-  let chunk = 0x1000 (* XXX(dinosaure): see [extract_dkim]. *)
-
-  let of_stream stream = { linger = Bytes.create chunk; pos = 0; stream }
+  let of_stream ?(size = 0x100) stream =
+    { linger = Bytes.create size; pos = 0; stream }
 
   let rec input ({ linger; pos; stream } as flow) tmp off len =
     let open Lwt.Infix in
@@ -87,12 +86,6 @@ struct
 
   let consumer_of_stream stream () = Lwt_scheduler.inj (Lwt_stream.get stream)
 
-  let rec drain stream =
-    let open Lwt.Infix in
-    Lwt_stream.get stream >>= function
-    | Some _ -> drain stream
-    | None -> Lwt.return_unit
-
   let is_not_errored = function
     | `Errored -> Lwt.return false
     | _ -> Lwt.return true
@@ -108,10 +101,10 @@ struct
    * As far as I can tell, such pattern for DKIM does not exist. *)
 
   let verify ?newline ?size ?nameserver ?timeout stream stack =
-    let flow = Flow.of_stream stream in
     let dns = DNS.create ?size ?nameserver ?timeout stack in
     let q = Queue.create () in
-    Dkim.extract_dkim ?newline flow lwt (module Flow) >>? fun extracted ->
+    Dkim.extract_dkim ?newline (Flow.of_stream stream) lwt (module Flow)
+    >>? fun extracted ->
     let f (dkim_field_name, dkim_field_value, m, s, r) =
       let fiber =
         Dkim.post_process_dkim m |> return >>? fun dkim ->
@@ -130,45 +123,55 @@ struct
           | false -> return (`Invalid dkim)) in
     let s_emitter x = Queue.push (`Simple x) q in
     let r_emitter x = Queue.push (`Relaxed x) q in
-    let s, s_bounded = Lwt_stream.create_bounded 10 in
-    let r, r_bounded = Lwt_stream.create_bounded 10 in
-    let clone (dkim_field_name, dkim_field_value, m) =
-      ( dkim_field_name,
-        dkim_field_value,
-        m,
-        Lwt_stream.clone s,
-        Lwt_stream.clone r ) in
-    let dkim_fields = List.map clone extracted.dkim_fields in
-    let (`Consume th) =
-      Dkim.extract_body ?newline flow lwt
-        (module Flow)
-        ~prelude:extracted.Dkim.prelude ~simple:s_emitter ~relaxed:r_emitter
-    in
+    let make_streams (dkim_field_name, dkim_field_value, m) =
+      let s, s_pusher = Lwt_stream.create_bounded 10 in
+      let r, r_pusher = Lwt_stream.create_bounded 10 in
+      ((dkim_field_name, dkim_field_value, m, s, r), (s_pusher, r_pusher)) in
+    let dkim_fields_with_streams = List.map make_streams extracted.dkim_fields in
+    let dkim_fields, pushers = List.split dkim_fields_with_streams in
+    let s_pushers, r_pushers = List.split pushers in
+    let i_emmitter, i_pusher = Lwt_stream.create_bounded 10 in
     let rec consume () =
       match Queue.pop q with
-      | `Simple (Some s) -> s_bounded#push s |> Lwt_scheduler.inj >>= consume
-      | `Relaxed (Some s) -> r_bounded#push s |> Lwt_scheduler.inj >>= consume
+      | `Await -> (
+          stream () |> Lwt_scheduler.inj >>= function
+          | Some v -> i_pusher#push v |> Lwt_scheduler.inj >>= consume
+          | None ->
+              i_pusher#close ;
+              consume ())
+      | `Simple (Some v) ->
+          Lwt_list.iter_p (fun s_pusher -> s_pusher#push v) s_pushers
+          |> Lwt_scheduler.inj
+          >>= consume
+      | `Relaxed (Some v) ->
+          Lwt_list.iter_p (fun r_pusher -> r_pusher#push v) r_pushers
+          |> Lwt_scheduler.inj
+          >>= consume
       | `Simple None ->
-          s_bounded#close ;
-          if s_bounded#closed && r_bounded#closed
+          List.iter (fun s_pusher -> s_pusher#close) s_pushers ;
+          if List.for_all (fun r_pusher -> r_pusher#closed) r_pushers
           then Lwt_scheduler.inj Lwt.return_unit
           else consume ()
       | `Relaxed None ->
-          r_bounded#close ;
-          if s_bounded#closed && r_bounded#closed
+          List.iter (fun r_pusher -> r_pusher#close) r_pushers ;
+          if List.for_all (fun s_pusher -> s_pusher#closed) s_pushers
           then Lwt_scheduler.inj Lwt.return_unit
           else consume ()
-      | exception Queue.Empty -> consume () in
+      | exception Queue.Empty -> Lwt.pause () |> Lwt_scheduler.inj >>= consume
+    in
+    let (`Consume th) =
+      Dkim.extract_body ?newline
+        (Flow.of_stream (fun () ->
+             Queue.push `Await q ;
+             Lwt_stream.get i_emmitter))
+        lwt
+        (module Flow)
+        ~prelude:extracted.Dkim.prelude ~simple:s_emitter ~relaxed:r_emitter
+    in
     let fiber =
       let open Lwt.Infix in
       Lwt.both
-        (Lwt.join
-           [
-             Lwt_scheduler.prj th;
-             Lwt_scheduler.prj (consume ());
-             drain s;
-             drain r;
-           ])
+        (Lwt.join [ Lwt_scheduler.prj th; Lwt_scheduler.prj (consume ()) ])
         (Lwt_list.map_p (Lwt_scheduler.prj <.> f) dkim_fields)
       >>= fun ((), results) ->
       Lwt_list.filter_p is_not_errored results >>= fun results ->
@@ -185,6 +188,15 @@ struct
     Lwt_scheduler.prj (verify ?newline ?size ?nameserver ?timeout stream stack)
 end
 
+(* XXX(dinosaure): this is where we save in the same time the incoming email
+ * to be able to restransmit then with the DKIM field. However, we must compute
+ * the signature (and read the entire incoming email) to be able to transmit
+ * the DKIM field. In others words, we must keep in memory the entire email while
+ * we compute the signature to be able to retransmit it with the DKIM-field.
+ *
+ * In the opposite of [verify], such operation is **not** memory safe. A big email
+ * can put a big pressure on the memory! *)
+
 module Flow_with_stream = struct
   type backend = Lwt_scheduler.t
 
@@ -195,11 +207,9 @@ module Flow_with_stream = struct
     stream : (string * int * int) stream;
   }
 
-  let chunk = 0x1000 (* XXX(dinosaure): see [extract_dkim]. *)
-
-  let of_stream stream =
+  let of_stream ?(size = 0x1000) stream =
     let stream', pusher = Lwt_stream.create () in
-    ({ linger = Bytes.create chunk; pos = 0; pusher; stream }, stream')
+    ({ linger = Bytes.create size; pos = 0; pusher; stream }, stream')
 
   let rec input ({ linger; pos; pusher; stream } as flow) tmp off len =
     let open Lwt.Infix in
@@ -236,7 +246,20 @@ module Stream = struct
 
   type backend = Lwt_scheduler.t
 
-  let create () = Lwt_stream.create ()
+  let create () =
+    let stream, push = Lwt_stream.create_bounded 10 in
+    let q = Queue.create () in
+    let rec th () =
+      let open Lwt.Infix in
+      match Queue.pop q with
+      | Some v -> push#push v >>= th
+      | None ->
+          push#close ;
+          Lwt.return_unit
+      | exception _ -> th () in
+    Lwt.async th ;
+    (* XXX(dinosaure): not really safe but eh! *)
+    (stream, fun v -> Queue.push v q)
 
   let get stream = Lwt_scheduler.inj (Lwt_stream.get stream)
 end
