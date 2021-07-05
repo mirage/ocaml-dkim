@@ -109,21 +109,20 @@ let p =
 let extract_dkim :
     type flow backend.
     ?newline:newline ->
+    ?size:int ->
     flow ->
     backend state ->
     (module FLOW with type flow = flow and type backend = backend) ->
     ((extracted, _) or_err, backend) io =
-  fun (type flow backend) ?(newline = LF) (flow : flow) (state : backend state)
+  fun (type flow backend) ?(newline = LF) ?(size = 0x1000) (flow : flow)
+      (state : backend state)
       (module Flow : FLOW with type flow = flow and type backend = backend) ->
    let open Mrmime in
    let ( >>= ) = state.bind in
    let return = state.return in
-
-   let chunk = 0x1000 in
-   (* XXX(dinosaure): be aware about [lwt] implementaton if you
-      change this value. *)
-   let raw = Bytes.create chunk in
+   let raw = Bytes.create size in
    let decoder = Hd.decoder p in
+
    let rec go others acc =
      match Hd.decode decoder with
      | `Field field -> (
@@ -706,6 +705,8 @@ let extract_body :
     | `End ->
         crlf relaxed 1 ;
         crlf simple 1 ;
+        relaxed None ;
+        simple None ;
         return ()
     | `Spaces _ as x -> go (x :: stack)
     | `CRLF -> go (`CRLF :: stack)
@@ -784,10 +785,15 @@ let body_hash_of_dkim :
     relaxed:(string, backend) stream ->
     _ dkim ->
     (vhash, backend) io =
- fun state ~simple ~relaxed dkim ->
+ fun ({ bind; return } as state) ~simple ~relaxed dkim ->
+  let ( >>= ) = bind in
+  let stream k () =
+    simple () >>= fun sv ->
+    relaxed () >>= fun rv ->
+    match k with `Simple -> return sv | `Relaxed -> return rv in
   match snd dkim.c with
-  | Value.Simple -> digest state (snd dkim.a) simple
-  | Value.Relaxed -> digest state (snd dkim.a) relaxed
+  | Value.Simple -> digest state (snd dkim.a) (stream `Simple)
+  | Value.Relaxed -> digest state (snd dkim.a) (stream `Relaxed)
   | Value.Canonicalization_ext x ->
       Fmt.invalid_arg "%s canonicalisation is not supported" x
 

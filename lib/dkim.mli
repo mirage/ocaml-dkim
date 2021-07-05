@@ -28,6 +28,7 @@ type extracted = {
 
 val extract_dkim :
   ?newline:newline ->
+  ?size:int ->
   'flow ->
   't Sigs.state ->
   (module Sigs.FLOW with type flow = 'flow and type backend = 't) ->
