@@ -46,9 +46,8 @@ module type DNS = sig
 
   type t
 
-  val getaddrinfo :
+  val gettxtrrecord :
     t ->
-    [ `TXT ] ->
     'a Domain_name.t ->
     ((string list, [> `Msg of string ]) result, backend) io
 end

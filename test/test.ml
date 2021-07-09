@@ -81,7 +81,7 @@ module Fake_resolver = struct
 
   type error = [ `Not_found ]
 
-  let getaddrinfo extra `TXT domain_name =
+  let gettxtrrecord extra domain_name =
     let () =
       match extra with
       | Some (v, _) ->

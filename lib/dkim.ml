@@ -817,7 +817,7 @@ let extract_server :
      Domain_name.prepend_label dkim.d "_domainkey" >>= Domain_name.append dkim.s
    in
    return domain_name >>? fun domain_name ->
-   Dns.getaddrinfo t `TXT domain_name >>? fun lst ->
+   Dns.gettxtrrecord t domain_name >>? fun lst ->
    (* XXX(dinosaure): RFC 6376 said: Strings in a TXT RR MUST be concatenated
       together before use with no intervening whitespace. *)
    let lst = List.map (String.concat "" <.> Astring.String.cuts ~sep:" ") lst in

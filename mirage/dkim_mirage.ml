@@ -70,14 +70,14 @@ struct
 
     type backend = Lwt_scheduler.t
 
-    let getaddrinfo dns `TXT domain_name =
+    let gettxtrrecord dns domain_name =
       let open Lwt.Infix in
       getaddrinfo dns Dns.Rr_map.Txt domain_name >>= function
       | Ok (_ttl, txtset) -> Lwt.return_ok (Dns.Rr_map.Txt_set.elements txtset)
       | Error err -> Lwt.return_error err
 
-    let getaddrinfo dns `TXT domain_name =
-      Lwt_scheduler.inj (getaddrinfo dns `TXT domain_name)
+    let gettxtrrecord dns domain_name =
+      Lwt_scheduler.inj (gettxtrrecord dns domain_name)
   end
 
   let epoch () =
