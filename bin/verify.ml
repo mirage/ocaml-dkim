@@ -18,7 +18,7 @@ module Dns = struct
 
   type backend = Unix_scheduler.t
 
-  let getaddrinfo t `TXT domain_name =
+  let gettxtrrecord t domain_name =
     match getaddrinfo t Dns.Rr_map.Txt domain_name with
     | Ok (_ttl, txtset) ->
         Unix_scheduler.inj (Ok (Dns.Rr_map.Txt_set.elements txtset))
