@@ -416,6 +416,22 @@ type server = {
   t : Value.name list;
 }
 
+(* XXX(dinosaure): lazy to implement these functions but
+ * the structural comparison is enough for us. *)
+let sort_whash = List.sort Stdlib.compare
+
+let sort_service = List.sort Stdlib.compare
+
+let sort_name = List.sort Stdlib.compare
+
+let equal_server (a : server) (b : server) =
+  a.v = b.v
+  && List.for_all2 ( = ) (sort_whash a.h) (sort_whash b.h)
+  && a.k = b.k
+  && a.p = b.p
+  && List.for_all2 ( = ) (sort_service a.s) (sort_service b.s)
+  && List.for_all2 ( = ) (sort_name a.t) (sort_name b.t)
+
 let pp_signature (V hash) ppf (H (hash', value)) =
   match equal_hash hash hash' with
   | Some Refl.Refl -> Digestif.pp hash ppf value

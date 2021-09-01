@@ -20,6 +20,8 @@ val pp_dkim : 'a dkim Fmt.t
 
 val pp_server : server Fmt.t
 
+val equal_server : server -> server -> bool
+
 type extracted = {
   dkim_fields : (Mrmime.Field_name.t * Unstrctrd.t * map) list;
   fields : (Mrmime.Field_name.t * Unstrctrd.t) list;
