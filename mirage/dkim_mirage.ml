@@ -92,6 +92,12 @@ struct
 
   let is_valid = function `Valid _ -> Lwt.return true | _ -> Lwt.return false
 
+  let server stack ?size ?nameserver ?timeout dkim =
+    let dns = DNS.create ?size ?nameserver ?timeout stack in
+    Lwt_scheduler.prj
+    @@ ( Dkim.extract_server dns lwt (module DNS) dkim >>? fun n ->
+         Dkim.post_process_server n |> return )
+
   (* XXX(dinosaure): this version is able to verify multiple DKIM fields
    * with a bounded stream according to the incoming stream. The trick is
    * to clone [simple] and [relaxed] bounded streams to all DKIM fields

@@ -6,6 +6,14 @@ module Make
     (C : Mirage_clock.MCLOCK)
     (P : Mirage_clock.PCLOCK)
     (S : Mirage_stack.V4V6) : sig
+  val server :
+    S.t ->
+    ?size:int ->
+    ?nameserver:[ `TCP | `UDP ] * (Ipaddr.t * int) ->
+    ?timeout:int64 ->
+    'a Dkim.dkim ->
+    (Dkim.server, [> `Msg of string ]) result Lwt.t
+
   val verify :
     ?newline:Dkim.newline ->
     ?size:int ->
