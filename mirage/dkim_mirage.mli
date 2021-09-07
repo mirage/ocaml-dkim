@@ -17,7 +17,7 @@ module Make
   val verify :
     ?newline:Dkim.newline ->
     ?size:int ->
-    ?nameserver:[ `Tcp | `Udp ] * (Ipaddr.t * int) ->
+    ?nameserver:Dns.proto * (Ipaddr.t * int) ->
     ?timeout:int64 ->
     (string * int * int) stream ->
     S.t ->
