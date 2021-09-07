@@ -425,12 +425,14 @@ let sort_service = List.sort Stdlib.compare
 let sort_name = List.sort Stdlib.compare
 
 let equal_server (a : server) (b : server) =
-  a.v = b.v
-  && List.for_all2 ( = ) (sort_whash a.h) (sort_whash b.h)
-  && a.k = b.k
-  && a.p = b.p
-  && List.for_all2 ( = ) (sort_service a.s) (sort_service b.s)
-  && List.for_all2 ( = ) (sort_name a.t) (sort_name b.t)
+  try
+    a.v = b.v
+    && List.for_all2 ( = ) (sort_whash a.h) (sort_whash b.h)
+    && a.k = b.k
+    && a.p = b.p
+    && List.for_all2 ( = ) (sort_service a.s) (sort_service b.s)
+    && List.for_all2 ( = ) (sort_name a.t) (sort_name b.t)
+  with _ -> false
 
 let pp_signature (V hash) ppf (H (hash', value)) =
   match equal_hash hash hash' with
@@ -979,7 +981,7 @@ let server_of_dkim : key:Mirage_crypto_pk.Rsa.priv -> 'a dkim -> server =
   let pub = Mirage_crypto_pk.Rsa.pub_of_priv key in
   let p = Cstruct.to_string (X509.Public_key.encode_der (`RSA pub)) in
   let k, h = dkim.a in
-  { v = "DKIM1"; h = [ h ]; n = None; k; p; s = []; t = [] }
+  { v = "DKIM1"; h = [ h ]; n = None; k; p; s = [ Value.All ]; t = [] }
 
 (* TODO(dinosaure): [s] and [t]. *)
 
