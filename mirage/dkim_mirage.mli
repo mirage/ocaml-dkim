@@ -9,7 +9,7 @@ module Make
   val server :
     S.t ->
     ?size:int ->
-    ?nameserver:[ `TCP | `UDP ] * (Ipaddr.t * int) ->
+    ?nameserver:[ `Tcp | `Udp ] * (Ipaddr.t * int) ->
     ?timeout:int64 ->
     'a Dkim.dkim ->
     (Dkim.server, [> `Msg of string ]) result Lwt.t
@@ -17,7 +17,7 @@ module Make
   val verify :
     ?newline:Dkim.newline ->
     ?size:int ->
-    ?nameserver:[ `TCP | `UDP ] * (Ipaddr.t * int) ->
+    ?nameserver:[ `Tcp | `Udp ] * (Ipaddr.t * int) ->
     ?timeout:int64 ->
     (string * int * int) stream ->
     S.t ->
