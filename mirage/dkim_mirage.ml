@@ -252,20 +252,7 @@ module Stream = struct
 
   type backend = Lwt_scheduler.t
 
-  let create () =
-    let stream, push = Lwt_stream.create_bounded 10 in
-    let q = Queue.create () in
-    let rec th () =
-      let open Lwt.Infix in
-      match Queue.pop q with
-      | Some v -> push#push v >>= th
-      | None ->
-          push#close ;
-          Lwt.return_unit
-      | exception _ -> th () in
-    Lwt.async th ;
-    (* XXX(dinosaure): not really safe but eh! *)
-    (stream, fun v -> Queue.push v q)
+  let create () = Lwt_stream.create ()
 
   let get stream = Lwt_scheduler.inj (Lwt_stream.get stream)
 end
