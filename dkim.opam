@@ -41,4 +41,6 @@ depends: [
 
 pin-depends: [
   [ "mrmime.dev" "git+https://github.com/mirage/mrmime.git#cb9b1fd598ba1efbed4ad1672bff228de6dcfdac" ]
+  [ "dns.dev" "git+https://github.com/mirage/ocaml-dns.git#eb8bac066cdc97e1a12bb1ccda854dd539092cf1" ]
+  [ "dns-client.dev" "git+https://github.com/mirage/ocaml-dns.git#eb8bac066cdc97e1a12bb1ccda854dd539092cf1" ]
 ]
