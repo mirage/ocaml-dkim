@@ -35,3 +35,6 @@ Rest of the email
 It prints the signed email then. The user is able to use a specific RSA private
 key or it can use a seed used to generate the RSA private key with the _fortuna_
 random number generator.
+
+`ocaml-dkim` has received funding from the Next Generation Internet Initiative
+(NGI) within the framework of the DAPSI Project.
