@@ -639,10 +639,6 @@ let relaxed_field_canonicalization (field_name : Mrmime.Field_name.t) unstrctrd
   f ":" ;
   let unstrctrd = (uniq <.> trim) unstrctrd in
   f (Unstrctrd.to_utf_8_string unstrctrd) ;
-  Log.debug (fun m ->
-      m "Digest %s:%s."
-        (String.lowercase_ascii (field_name :> string))
-        (Unstrctrd.to_utf_8_string unstrctrd)) ;
   f "\r\n"
 
 let relaxed_dkim_field_canonicalization (field_name : Mrmime.Field_name.t)
@@ -734,7 +730,8 @@ let extract_body :
         digest_stack simple stack ;
         simple (Some x) ;
         go [] in
-  Body.src decoder raw 0 (String.length prelude) ;
+  if String.length prelude > 0
+  then Body.src decoder raw 0 (String.length prelude) ;
   `Consume (go [])
 (* return
    {
@@ -884,7 +881,6 @@ let data_hash_of_dkim fields ((field_dkim : Mrmime.Field_name.t), raw_dkim) dkim
   let _ =
     List.fold_left
       (fun fields requested ->
-        Log.debug (fun m -> m "Field %a." Mrmime.Field_name.pp requested) ;
         match assoc requested fields with
         | Some (field_name, unstrctrd) ->
             canonicalization field_name unstrctrd (fun x -> Queue.push x q) ;
