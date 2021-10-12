@@ -321,13 +321,13 @@ module Encoder = struct
   let algorithm ppf v =
     let algorithm ppf = function
       | Value.RSA, hash ->
-          let hash = Fmt.strf "%a" pp_hash hash in
+          let hash = Fmt.str "%a" pp_hash hash in
           eval ppf [ string $ "rsa"; cut; char $ '-'; cut; !!string ] hash
       | Value.ED25519, hash ->
-          let hash = Fmt.strf "%a" pp_hash hash in
+          let hash = Fmt.str "%a" pp_hash hash in
           eval ppf [ string $ "ed25519"; cut; char $ '-'; cut; !!string ] hash
       | Value.Algorithm_ext v, hash ->
-          let hash = Fmt.strf "%a" pp_hash hash in
+          let hash = Fmt.str "%a" pp_hash hash in
           eval ppf [ !!string; cut; char $ '-'; cut; !!string ] v hash in
     tag algorithm ppf ("a", v)
 
