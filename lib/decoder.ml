@@ -1,6 +1,6 @@
 open Angstrom
 
-let failf fmt = Fmt.kstrf fail fmt
+let failf fmt = Fmt.kstr fail fmt
 
 let is_digit = function '0' .. '9' -> true | _ -> false
 

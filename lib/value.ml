@@ -66,9 +66,9 @@ let pp_auid ppf t =
 let pp_query ppf (query, arg) =
   match query with
   | `DNS `TXT ->
-      Fmt.pf ppf "dns/txt%a" Fmt.(option (prefix (const string ":") string)) arg
+      Fmt.pf ppf "dns/txt%a" Fmt.(option (const string ":" ++ string)) arg
   | `Query_ext x ->
-      Fmt.pf ppf "%s%a" x Fmt.(option (prefix (const string ":") string)) arg
+      Fmt.pf ppf "%s%a" x Fmt.(option (const string ":" ++ string)) arg
 
 let pp_copy = Fmt.Dump.pair Mrmime.Field_name.pp Fmt.string
 
