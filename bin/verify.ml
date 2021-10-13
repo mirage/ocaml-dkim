@@ -75,12 +75,12 @@ let stream_of_queue q () =
   | exception _ -> Unix_scheduler.inj None
 
 let run quiet src newline nameserver =
-  let nameserver =
+  let nameservers =
     match nameserver with
     | Some (inet_addr, port) ->
-        Some (`Tcp, (Ipaddr_unix.of_inet_addr inet_addr, port))
+        Some (`Tcp, [ (Ipaddr_unix.of_inet_addr inet_addr, port) ])
     | None -> None in
-  let dns = Dns_client_unix.create ?nameserver () in
+  let dns = Dns_client_unix.create ?nameservers () in
   let flow = Flow.of_input src in
   let open Rresult in
   Unix_scheduler.prj (Dkim.extract_dkim flow unix (module Flow))
