@@ -92,8 +92,8 @@ struct
 
   let is_valid = function `Valid _ -> Lwt.return true | _ -> Lwt.return false
 
-  let server stack ?size ?nameserver ?timeout dkim =
-    let dns = DNS.create ?size ?nameserver ?timeout stack in
+  let server stack ?size ?nameservers ?timeout dkim =
+    let dns = DNS.create ?size ?nameservers ?timeout stack in
     Lwt_scheduler.prj
     @@ ( Dkim.extract_server dns lwt (module DNS) dkim >>? fun n ->
          Dkim.post_process_server n |> return )
@@ -106,8 +106,8 @@ struct
    *
    * As far as I can tell, such pattern for DKIM does not exist. *)
 
-  let verify ?newline ?size ?nameserver ?timeout stream stack =
-    let dns = DNS.create ?size ?nameserver ?timeout stack in
+  let verify ?newline ?size ?nameservers ?timeout stream stack =
+    let dns = DNS.create ?size ?nameservers ?timeout stack in
     let q = Queue.create () in
     Dkim.extract_dkim ?newline (Flow.of_stream stream) lwt (module Flow)
     >>? fun extracted ->
@@ -190,8 +190,8 @@ struct
     in
     return (Ok (valids, invalids))
 
-  let verify ?newline ?size ?nameserver ?timeout stream stack =
-    Lwt_scheduler.prj (verify ?newline ?size ?nameserver ?timeout stream stack)
+  let verify ?newline ?size ?nameservers ?timeout stream stack =
+    Lwt_scheduler.prj (verify ?newline ?size ?nameservers ?timeout stream stack)
 end
 
 (* XXX(dinosaure): this is where we save in the same time the incoming email
