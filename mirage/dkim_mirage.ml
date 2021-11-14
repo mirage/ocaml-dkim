@@ -61,12 +61,15 @@ let lwt = { Dkim.Sigs.bind; return }
 module Make
     (R : Mirage_random.S)
     (T : Mirage_time.S)
-    (C : Mirage_clock.MCLOCK)
+    (M : Mirage_clock.MCLOCK)
     (P : Mirage_clock.PCLOCK)
     (S : Mirage_stack.V4V6) =
 struct
+  type nameserver =
+    [ `Plaintext of Ipaddr.t * int | `Tls of Tls.Config.client * Ipaddr.t * int ]
+
   module DNS = struct
-    include Dns_client_mirage.Make (R) (T) (C) (S)
+    include Dns_client_mirage.Make (R) (T) (M) (P) (S)
 
     type backend = Lwt_scheduler.t
 

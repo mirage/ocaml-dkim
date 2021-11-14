@@ -6,10 +6,13 @@ module Make
     (C : Mirage_clock.MCLOCK)
     (P : Mirage_clock.PCLOCK)
     (S : Mirage_stack.V4V6) : sig
+  type nameserver =
+    [ `Plaintext of Ipaddr.t * int | `Tls of Tls.Config.client * Ipaddr.t * int ]
+
   val server :
     S.t ->
     ?size:int ->
-    ?nameservers:Dns.proto * (Ipaddr.t * int) list ->
+    ?nameservers:Dns.proto * nameserver list ->
     ?timeout:int64 ->
     'a Dkim.dkim ->
     (Dkim.server, [> `Msg of string ]) result Lwt.t
@@ -17,7 +20,7 @@ module Make
   val verify :
     ?newline:Dkim.newline ->
     ?size:int ->
-    ?nameservers:Dns.proto * (Ipaddr.t * int) list ->
+    ?nameservers:Dns.proto * nameserver list ->
     ?timeout:int64 ->
     (string * int * int) stream ->
     S.t ->
