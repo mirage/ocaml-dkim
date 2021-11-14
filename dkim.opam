@@ -23,10 +23,11 @@ depends: [
   "mrmime"     {>= "0.3.1"}
   "digestif"   {>= "0.9.0"}
   "ipaddr"
+  "astring"
   "base-unix"
   "hmap"
   "domain-name"
-  "dns-client" {>= "5.0.0"}
+  "dns-client" {>= "6.0.0"}
   "cmdliner"
   "logs"
   "fmt"        {>= "0.8.7"}
@@ -37,10 +38,4 @@ depends: [
   "x509" {>= "0.6.3"}
   "mirage-crypto-rng" {with-test}
   "alcotest"   {with-test}
-]
-
-pin-depends: [
-  [ "mrmime.dev" "git+https://github.com/mirage/mrmime.git#9784a03cdbbda61f250ec5c0a995ae9263fbcf4a" ]
-  [ "dns.dev" "git+https://github.com/mirage/ocaml-dns.git#1cc956368241beca6157eb4a3351174837e2bbd5" ]
-  [ "dns-client.dev" "git+https://github.com/mirage/ocaml-dns.git#1cc956368241beca6157eb4a3351174837e2bbd5" ]
 ]
