@@ -24,7 +24,6 @@ depends: [
   "digestif"   {>= "0.9.0"}
   "ipaddr"
   "astring"    {>= "0.8.5"}
-  "rresult"    {>= "0.7.0"}
   "base-unix"
   "hmap"
   "domain-name"

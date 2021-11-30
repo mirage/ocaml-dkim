@@ -25,7 +25,6 @@ depends: [
   "mirage-random"
   "mirage-clock"
   "mirage-stack"
-  "rresult"    {>= "0.7.0"}
   "lwt"
   "alcotest"   {with-test}
   "digestif"   {with-test}
