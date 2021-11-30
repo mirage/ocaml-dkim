@@ -1,3 +1,7 @@
+### v0.3.1 2021-11-30 Paris (France)
+
+- Remove `rresult` dependency (#32, @dinosaure)
+
 ### v0.3.0 2021-11-15 Paris (France)
 
 - Upgrade to the new interface of `mrmime` (#15, @dinosaure)
