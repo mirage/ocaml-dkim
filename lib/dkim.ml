@@ -6,7 +6,11 @@ module Body = Body
 module Sigs = Sigs
 open Sigs
 
-type (+'a, 'err) or_err = ('a, ([> Rresult.R.msg ] as 'err)) result
+type (+'a, 'err) or_err = ('a, ([> `Msg of string ] as 'err)) result
+
+let error_msgf fmt = Fmt.kstr (fun msg -> Error (`Msg msg)) fmt
+
+let failwith_error_msg = function Ok v -> v | Error (`Msg err) -> failwith err
 
 type map = Map.t
 
@@ -20,20 +24,19 @@ let trim unstrctrd =
   let fold acc = function
     | `WSP _ | `FWS _ | `CR | `LF -> acc
     | elt -> elt :: acc in
-  Unstrctrd.fold ~f:fold [] unstrctrd
-  |> List.rev
-  |> Unstrctrd.of_list
-  |> Rresult.R.get_ok
+  Unstrctrd.fold ~f:fold [] unstrctrd |> List.rev |> Unstrctrd.of_list
+  |> function
+  | Ok v -> v
+  | Error _ -> assert false
 
 let parse_dkim_field_value unstrctrd =
   let str = Unstrctrd.(to_utf_8_string (trim unstrctrd)) in
   match Angstrom.parse_string ~consume:All Decoder.mail_tag_list str with
   | Ok v -> Ok v
-  | Error _err -> Rresult.R.error_msgf "Invalid DKIM Signature: %S" str
-  | exception _ -> Rresult.R.error_msgf "Invalid DKIM Signature: %S" str
+  | Error _err -> error_msgf "Invalid DKIM Signature: %S" str
+  | exception _ -> error_msgf "Invalid DKIM Signature: %S" str
 
 let parse_dkim_server_value str =
-  let open Rresult in
   let _, unstrctrd = Unstrctrd.safely_decode str in
   let unstrctrd = trim unstrctrd in
   match
@@ -43,10 +46,10 @@ let parse_dkim_server_value str =
   | Ok _ as v -> v
   | Error _ ->
       Log.warn (fun m -> m "Invalid DKIM server value: %S" str) ;
-      Rresult.R.error_msgf "Invalid DKIM value"
+      error_msgf "Invalid DKIM value"
   | exception _ ->
       Log.warn (fun m -> m "Invalid DKIM server value: %S" str) ;
-      Rresult.R.error_msgf "Invalid DKIM value"
+      error_msgf "Invalid DKIM value"
 
 type newline = CRLF | LF
 
@@ -86,7 +89,9 @@ type extracted = {
 let to_unstrctrd unstructured =
   let fold acc = function #Unstrctrd.elt as elt -> elt :: acc | _ -> acc in
   let unstrctrd = List.fold_left fold [] unstructured in
-  Rresult.R.get_ok (Unstrctrd.of_list (List.rev unstrctrd))
+  match Unstrctrd.of_list (List.rev unstrctrd) with
+  | Ok v -> v
+  | Error _ -> assert false
 
 let p =
   let open Mrmime in
@@ -151,10 +156,10 @@ let extract_dkim :
          | _ -> assert false)
      | `Malformed _err ->
          Log.err (fun m -> m "The given email is malformed.") ;
-         return (Rresult.R.error_msg "Invalid email")
+         return (error_msgf "Invalid email")
      | `End rest ->
          return
-           (Rresult.R.ok
+           (Ok
               {
                 prelude = rest;
                 fields = List.rev others;
@@ -505,8 +510,8 @@ let string_of_quoted_printable x =
     | `Char chr ->
         Buffer.add_char res chr ;
         go ()
-    | `End -> Rresult.R.ok (Buffer.contents res)
-    | `Malformed err -> Rresult.R.error_msg err in
+    | `End -> Ok (Buffer.contents res)
+    | `Malformed err -> error_msgf "%s" err in
   go ()
 
 module SSet = Set.Make (Mrmime.Field_name)
@@ -540,9 +545,7 @@ let post_process_dkim hmap =
     | None -> (Value.Simple, Value.Simple) in
   let d =
     match Map.find Map.K.d hmap with
-    | Some v ->
-        Rresult.R.failwith_error_msg
-          (Domain_name.of_string (String.concat "." v))
+    | Some v -> failwith_error_msg (Domain_name.of_string (String.concat "." v))
     | None -> Fmt.failwith "SDID is required" in
   let h =
     match Map.find Map.K.h hmap with
@@ -560,9 +563,7 @@ let post_process_dkim hmap =
       (Option.value ~default:[] (Map.find Map.K.q hmap)) in
   let s =
     match Map.find Map.K.s hmap with
-    | Some v ->
-        Rresult.R.failwith_error_msg
-          (Domain_name.of_string (String.concat "." v))
+    | Some v -> failwith_error_msg (Domain_name.of_string (String.concat "." v))
     | None -> Fmt.failwith "Selector is required" in
   let t = Map.find Map.K.t hmap in
   let x = Map.find Map.K.x hmap in
@@ -576,8 +577,7 @@ let post_process_dkim hmap =
   { v; a; c; d; h; i; l; q; s; t; x; z; signature = (b, bh) }
 
 let post_process_dkim hmap =
-  try Rresult.R.ok (post_process_dkim hmap)
-  with Failure err -> Rresult.R.error_msg err
+  try Ok (post_process_dkim hmap) with Failure err -> error_msgf "%s" err
 
 let post_process_server hmap =
   let v = Option.value ~default:"DKIM1" (Map.find Map.K.sv hmap) in
@@ -597,8 +597,8 @@ let post_process_server hmap =
   { v; h; k; n; p; s; t }
 
 let post_process_server hmap =
-  try Rresult.R.ok (post_process_server hmap)
-  with Invalid_argument err -> Rresult.R.error_msg err
+  try Ok (post_process_server hmap)
+  with Invalid_argument err -> error_msgf "%s" err
 
 let simple_field_canonicalization (field_name : Mrmime.Field_name.t) unstrctrd f
     =
@@ -622,7 +622,7 @@ let trim unstrctrd =
     | elt -> (elt :: acc, false) in
   Unstrctrd.fold ~f:fold ([], true) unstrctrd |> fun (lst, _) ->
   List.fold_left fold ([], true) lst |> fun (lst, _) ->
-  Unstrctrd.of_list lst |> Rresult.R.get_ok
+  Unstrctrd.of_list lst |> function Ok v -> v | Error _ -> assert false
 
 let uniq unstrctrd =
   let fold (acc, state) elt =
@@ -631,7 +631,9 @@ let uniq unstrctrd =
     | `FWS _ | `WSP _ -> (elt :: acc, true)
     | elt -> (elt :: acc, false) in
   Unstrctrd.fold ~f:fold ([], false) unstrctrd |> fun (lst, _) ->
-  Unstrctrd.of_list (List.rev lst) |> Rresult.R.get_ok
+  Unstrctrd.of_list (List.rev lst) |> function
+  | Ok v -> v
+  | Error _ -> assert false
 
 let relaxed_field_canonicalization (field_name : Mrmime.Field_name.t) unstrctrd
     f =
@@ -766,7 +768,9 @@ let remove_signature_of_raw_dkim unstrctrd =
     | _, `_2 -> (acc, `_2)
     | elt, `_3 -> (elt :: acc, `_3) in
   let res, _ = Unstrctrd.fold ~f:fold ([], `_0) unstrctrd in
-  Rresult.R.get_ok (Unstrctrd.of_list (List.rev res))
+  match Unstrctrd.of_list (List.rev res) with
+  | Ok v -> v
+  | Error _ -> assert false
 
 type ('a, 'backend) stream = unit -> ('a option, 'backend) io
 
@@ -828,7 +832,7 @@ let extract_server :
      x >>= function Ok x -> f x | Error err -> return (Error err) in
 
    let domain_name =
-     let open Rresult in
+     let ( >>= ) = Result.bind in
      Domain_name.prepend_label dkim.d "_domainkey" >>= Domain_name.append dkim.s
    in
    return domain_name >>? fun domain_name ->
@@ -1024,7 +1028,7 @@ let server_to_string server =
 let domain_name :
     'a dkim -> ([ `raw ] Domain_name.t, [> `Msg of string ]) result =
  fun dkim ->
-  let open Rresult in
+  let ( >>= ) = Result.bind in
   Domain_name.prepend_label dkim.d "_domainkey" >>= Domain_name.append dkim.s
 
 let sign :
@@ -1103,8 +1107,9 @@ let sign :
         Fmt.invalid_arg "%s canonicalisation is not supported" x in
   let str = Prettym.to_string ~new_line:"\r\n" Encoder.as_field dkim' in
   let unstrctrd =
-    Rresult.R.get_ok
-      (Angstrom.parse_string ~consume:All dkim_field_and_value str) in
+    match Angstrom.parse_string ~consume:All dkim_field_and_value str with
+    | Ok v -> v
+    | Error _ -> assert false in
   canon field_dkim_signature unstrctrd (fun x -> Queue.push x q) ;
   let (H (k, vhash)) = digesti (fun f -> Queue.iter f q) in
   let message = `Digest (Cstruct.of_string (Digestif.to_raw_string k vhash)) in
