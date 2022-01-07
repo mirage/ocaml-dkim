@@ -1,25 +1,16 @@
 module Sigs = Sigs
 
 type (+'a, 'err) or_err = ('a, ([> Rresult.R.msg ] as 'err)) result
-
 type newline = CRLF | LF
-
 type map
-
 type signed
-
 type unsigned
-
 type 'a dkim
-
 type server
-
 type body
 
 val pp_dkim : 'a dkim Fmt.t
-
 val pp_server : server Fmt.t
-
 val equal_server : server -> server -> bool
 
 type extracted = {
@@ -132,11 +123,8 @@ val verify :
     unverified email - regardless of whether or not it looks like it was signed. *)
 
 type algorithm = [ `RSA ]
-
 type hash = [ `SHA1 | `SHA256 ]
-
 type canonicalization = [ `Simple | `Relaxed ]
-
 type query = [ `DNS of [ `TXT ] ]
 
 val v :
@@ -155,7 +143,6 @@ val v :
 
 module Encoder : sig
   val dkim_signature : signed dkim Prettym.t
-
   val as_field : signed dkim Prettym.t
 end
 
@@ -201,5 +188,4 @@ val relaxed_field_canonicalization :
 module Body = Body
 
 val parse_dkim_field_value : Unstrctrd.t -> (map, [> `Msg of string ]) result
-
 val field_dkim_signature : Mrmime.Field_name.t

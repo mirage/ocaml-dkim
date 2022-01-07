@@ -1,13 +1,8 @@
 type algorithm = RSA | ED25519 | Algorithm_ext of string
-
 type hash = SHA1 | SHA256 | Hash_ext of string
-
 type canonicalization = Simple | Relaxed | Canonicalization_ext of string
-
 type base64 = string
-
 type version = int
-
 type domain_name = string list
 
 type auid = {
@@ -16,22 +11,16 @@ type auid = {
 }
 
 type quoted_printable = string
-
 type dns_record = [ `TXT ]
 
 type query =
   [ `DNS of dns_record | `Query_ext of string ] * quoted_printable option
 
 type selector = string list
-
 type flag = Y | S | Flag_ext of string
-
 type copies = (Mrmime.Field_name.t * quoted_printable) list
-
 type service = Email | All | Service_ext of string
-
 type name = Y | S | Name_ext of string
-
 type server_version = string
 
 let pp_algorithm ppf = function
@@ -50,7 +39,6 @@ let pp_canonicalization ppf = function
   | Canonicalization_ext x -> Fmt.string ppf x
 
 let pp_domain_name = Fmt.(list ~sep:(const string ".") string)
-
 let pp_selector = Fmt.(list ~sep:(const string ".") string)
 
 let pp_auid ppf t =

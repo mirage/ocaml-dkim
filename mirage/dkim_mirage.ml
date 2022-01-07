@@ -48,7 +48,6 @@ let bind x f =
   Lwt_scheduler.inj (Lwt_scheduler.prj x >>= (Lwt_scheduler.prj <.> f))
 
 let return x = Lwt_scheduler.inj (Lwt.return x)
-
 let ( >>= ) x f = bind x f
 
 let ( >>? ) x f =
@@ -252,11 +251,9 @@ end
 
 module Stream = struct
   type 'a t = 'a Lwt_stream.t
-
   type backend = Lwt_scheduler.t
 
   let create () = Lwt_stream.create ()
-
   let get stream = Lwt_scheduler.inj (Lwt_stream.get stream)
 end
 
