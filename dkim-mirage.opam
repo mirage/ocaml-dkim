@@ -24,7 +24,7 @@ depends: [
   "mirage-time"
   "mirage-random"
   "mirage-clock"
-  "mirage-stack"
+  "tcpip"      {>= "7.0.0"}
   "lwt"
   "alcotest"   {with-test}
   "digestif"   {with-test}

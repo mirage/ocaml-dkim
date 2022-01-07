@@ -63,7 +63,7 @@ module Make
     (T : Mirage_time.S)
     (M : Mirage_clock.MCLOCK)
     (P : Mirage_clock.PCLOCK)
-    (S : Mirage_stack.V4V6) =
+    (S : Tcpip.Stack.V4V6) =
 struct
   type nameserver =
     [ `Plaintext of Ipaddr.t * int | `Tls of Tls.Config.client * Ipaddr.t * int ]
