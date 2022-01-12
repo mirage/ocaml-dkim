@@ -9,13 +9,11 @@ open Sigs
 type (+'a, 'err) or_err = ('a, ([> `Msg of string ] as 'err)) result
 
 let error_msgf fmt = Fmt.kstr (fun msg -> Error (`Msg msg)) fmt
-
 let failwith_error_msg = function Ok v -> v | Error (`Msg err) -> failwith err
 
 type map = Map.t
 
 let ( <.> ) f g x = f (g x)
-
 let src = Logs.Src.create "dkim" ~doc:"logs dkim's event"
 
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -191,9 +189,7 @@ let equal_hash :
   | _, _ -> None
 
 type vhash = H : 'k Digestif.hash * 'k Digestif.t -> vhash
-
 type signed = string * vhash
-
 type unsigned = unit
 
 type 'signature dkim = {
@@ -213,15 +209,11 @@ type 'signature dkim = {
 }
 
 let expire { t; _ } = t
-
 let fields { h; _ } = h
 
 type algorithm = [ `RSA ]
-
 type hash = [ `SHA1 | `SHA256 ]
-
 type canonicalization = [ `Simple | `Relaxed ]
-
 type query = [ `DNS of [ `TXT ] ]
 
 let v ?(version = 1) ?(fields = [ Mrmime.Field_name.from ]) ~selector
@@ -254,7 +246,6 @@ let v ?(version = 1) ?(fields = [ Mrmime.Field_name.from ]) ~selector
   { v = version; a; c; d; t; x; h; l; s; i = None; z = []; q; signature = () }
 
 let selector { s; _ } = s
-
 let domain { d; _ } = d
 
 module Encoder = struct
@@ -424,9 +415,7 @@ type server = {
 (* XXX(dinosaure): lazy to implement these functions but
  * the structural comparison is enough for us. *)
 let sort_whash = List.sort Stdlib.compare
-
 let sort_service = List.sort Stdlib.compare
-
 let sort_name = List.sort Stdlib.compare
 
 let equal_server (a : server) (b : server) =
@@ -673,7 +662,6 @@ let crlf digest n =
   if n < 0 then Fmt.invalid_arg "Expect at least 0 <crlf>" else go n
 
 type iter = string Digestif.iter
-
 type body = { relaxed : iter; simple : iter }
 
 let extract_body :

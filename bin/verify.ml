@@ -4,7 +4,6 @@ end)
 
 module Caml_flow = struct
   type backend = Unix_scheduler.t
-
   type flow = { ic : in_channel; buf : Buffer.t }
 
   let input flow buf off len =
@@ -31,7 +30,6 @@ let unix =
 
 module Flow = struct
   type backend = Unix_scheduler.t
-
   type flow = { ic : in_channel; buffer : Buffer.t; close : bool }
 
   let of_input = function
@@ -49,7 +47,6 @@ module Flow = struct
 end
 
 let ( <.> ) f g x = f (g x)
-
 let epoch = Int64.of_float <.> Unix.gettimeofday
 
 let show_result ~valid:v_valid ~invalid:v_invalid =
@@ -66,7 +63,6 @@ let show_result ~valid:v_valid ~invalid:v_invalid =
   List.iter invalid v_invalid
 
 let exit_success = 0
-
 let exit_failure = 1
 
 let stream_of_queue q () =

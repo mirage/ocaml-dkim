@@ -1,5 +1,4 @@
 let () = Mirage_crypto_rng_unix.initialize ()
-
 let ( <.> ) f g x = f (g x)
 
 let reporter ppf =
@@ -17,9 +16,7 @@ let reporter ppf =
   { Logs.report }
 
 let () = Fmt_tty.setup_std_outputs ~style_renderer:`Ansi_tty ~utf_8:true ()
-
 let () = Logs.set_reporter (reporter Fmt.stdout)
-
 let () = Logs.set_level ~all:true (Some Logs.Debug)
 
 let smtpapi__domainkey_sendgrid_info =
@@ -67,7 +64,6 @@ end)
 
 module Caml_flow = struct
   type backend = Unix_scheduler.t
-
   type flow = in_channel
 
   let input flow buf off len =
@@ -76,9 +72,7 @@ end
 
 module Fake_resolver = struct
   type t = ([ `raw ] Domain_name.t * Dkim.server) option
-
   type backend = Unix_scheduler.t
-
   type error = [ `Not_found ]
 
   let gettxtrrecord extra domain_name =
@@ -211,7 +205,6 @@ let test_verify (trust, filename) =
 
 module Caml_stream = struct
   type 'a t = 'a Queue.t
-
   type backend = Unix_scheduler.t
 
   let create () =

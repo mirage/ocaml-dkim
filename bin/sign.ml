@@ -4,7 +4,6 @@ end)
 
 module Caml_flow = struct
   type backend = Unix_scheduler.t
-
   type flow = { ic : in_channel; buf : Buffer.t }
 
   let input flow buf off len =
@@ -39,7 +38,6 @@ let priv_of_seed seed =
 
 module Flow = struct
   type backend = Unix_scheduler.t
-
   type flow = { ic : in_channel; buffer : Buffer.t; close : bool }
 
   let of_input = function
@@ -58,7 +56,6 @@ end
 
 module Stream = struct
   type 'a t = 'a Queue.t
-
   type backend = Unix_scheduler.t
 
   let create () =

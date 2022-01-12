@@ -19,7 +19,6 @@ module K = struct
       }
 
   let b : base64 key = Key.create { name = "signature"; pp = Fmt.string }
-
   let bh : base64 key = Key.create { name = "hash"; pp = Fmt.string }
 
   let c : (canonicalization * canonicalization) key =
@@ -36,7 +35,6 @@ module K = struct
     Key.create { name = "field"; pp = Fmt.Dump.list Mrmime.Field_name.pp }
 
   let i : auid key = Key.create { name = "auid"; pp = Value.pp_auid }
-
   let l : int key = Key.create { name = "length"; pp = Fmt.int }
 
   let q : query list key =
@@ -46,7 +44,6 @@ module K = struct
     Key.create { name = "selector"; pp = Value.pp_selector }
 
   let t : int64 key = Key.create { name = "timestamp"; pp = Fmt.int64 }
-
   let x : int64 key = Key.create { name = "expiration"; pp = Fmt.int64 }
 
   let z : copies key =
@@ -62,7 +59,6 @@ module K = struct
     Key.create { name = "algorithm"; pp = Value.pp_algorithm }
 
   let p : base64 key = Key.create { name = "public-key"; pp = Fmt.string }
-
   let n : string key = Key.create { name = "notes"; pp = Fmt.string }
 
   let ss : service list key =

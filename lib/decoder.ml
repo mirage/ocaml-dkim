@@ -1,21 +1,13 @@
 open Angstrom
 
 let failf fmt = Fmt.kstr fail fmt
-
 let is_digit = function '0' .. '9' -> true | _ -> false
-
 let is_alpha = function 'a' .. 'z' | 'A' .. 'Z' -> true | _ -> false
-
 let is_plus = ( = ) '+'
-
 let is_slash = ( = ) '/'
-
 let is_dash = ( = ) '-'
-
 let is_equal = ( = ) '='
-
 let ( or ) f g x = f x || g x
-
 let is_base64 = is_digit or is_alpha or is_plus or is_slash or is_equal
 
 (* XXX(dinosaure): [is_equal] is necessary to take padding but a
@@ -116,15 +108,10 @@ let hyphenated_word =
     hdr-name        =  field-name
 *)
 let hdr_name = field_name
-
 let rsa = string "rsa" *> return Value.RSA
-
 let sha1 = string "sha1" *> return Value.SHA1
-
 let sha256 = string "sha256" *> return Value.SHA256
-
 let simple = string "simple" *> return Value.Simple
-
 let relaxed = string "relaxed" *> return Value.Relaxed
 
 let algorithm_extension : Value.algorithm t =
@@ -153,7 +140,6 @@ let dkim_quoted_printable =
     | chr -> is_hex chr)
 
 let qp_hdr_value = dkim_quoted_printable
-
 let qp_section = dkim_quoted_printable
 
 (* XXX(dinosaure): RFC 6376 said: a single line of quoted-printable-encoded
