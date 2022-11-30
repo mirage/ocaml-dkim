@@ -1,3 +1,10 @@
+### v0.4.0 2022-11-30 Paris (France)
+
+- Upgrade the distribuction with:
+  `ocamlformat.0.23.0.`
+  `cmdliner.1.1.0`
+  `dns.6.4.0` (@dinosaure, @hannesm, #36)
+
 ### v0.3.1 2021-11-30 Paris (France)
 
 - Remove `rresult` dependency (#32, @dinosaure)
