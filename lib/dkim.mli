@@ -162,7 +162,9 @@ val sign :
 
     The returned signed {!dkim} can be serialized with:
 
-    {[ let dkim_field = Prettym.to_string Dkim.Encoder.as_field dkim ]} *)
+    {[
+      let dkim_field = Prettym.to_string Dkim.Encoder.as_field dkim
+    ]} *)
 
 val server_of_dkim : key:Mirage_crypto_pk.Rsa.priv -> 'a dkim -> server
 (** [server_of_dkim] returns the required server value from a {!dkim} value. The
