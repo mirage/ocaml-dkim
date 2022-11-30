@@ -268,10 +268,8 @@ let canon =
   let doc =
     "Canonicalization algorithm used to digest header's fields and body. \
      Default value is $(i,relaxed/relaxed). A $(i,simple) canonicalization can \
-     be\n\
-    \             used. The format of the argument is: $(i,canon)/$(i,canon) \
-     or $(i,canon) to\n\
-    \             use the same canonicalization for both header's fields and \
+     be used. The format of the argument is: $(i,canon)/$(i,canon) or \
+     $(i,canon) to use the same canonicalization for both header's fields and \
      body." in
   Arg.(value & opt (some canon) None & info [ "c" ] ~doc)
 
@@ -284,11 +282,11 @@ let hostname =
 let common_options = "COMMON OPTIONS"
 
 let verbosity =
-  let env = Arg.env_var "SIGN_LOGS" in
+  let env = Cmd.Env.info "SIGN_LOGS" in
   Logs_cli.level ~env ~docs:common_options ()
 
 let renderer =
-  let env = Arg.env_var "SIGN_FMT" in
+  let env = Cmd.Env.info "SIGN_FMT" in
   Fmt_cli.style_renderer ~docs:common_options ~env ()
 
 let reporter ppf =
@@ -312,11 +310,26 @@ let setup_logs style_renderer level =
 
 let setup_logs = Term.(const setup_logs $ renderer $ verbosity)
 
+let term =
+  Term.(
+    ret
+      (const run
+      $ setup_logs
+      $ src
+      $ dst
+      $ newline
+      $ private_key
+      $ seed
+      $ selector
+      $ hash
+      $ canon
+      $ hostname))
+
 let sign =
   let doc =
     "Sign an email with a private-key and re-export the given email with a \
      DKIM-Signature." in
-  let exits = Term.default_exits in
+  let exits = Cmd.Exit.defaults in
   let man =
     [
       `S Manpage.s_description;
@@ -329,19 +342,6 @@ let sign =
         "The output can used as is to a command which is able to send an email \
          (such as $(b,sendmail)).";
     ] in
-  ( Term.(
-      ret
-        (const run
-        $ setup_logs
-        $ src
-        $ dst
-        $ newline
-        $ private_key
-        $ seed
-        $ selector
-        $ hash
-        $ canon
-        $ hostname)),
-    Term.info "sign" ~doc ~exits ~man )
+  Cmd.v (Cmd.info "sign" ~doc ~exits ~man) term
 
-let () = Term.(exit @@ eval sign)
+let () = exit @@ Cmd.eval sign

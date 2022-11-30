@@ -11,7 +11,8 @@ module Make
 
   val server :
     S.t ->
-    ?size:int ->
+    ?cache_size:int ->
+    ?edns:[ `Auto | `Manual of Dns.Edns.t | `None ] ->
     ?nameservers:Dns.proto * nameserver list ->
     ?timeout:int64 ->
     'a Dkim.dkim ->
@@ -19,7 +20,8 @@ module Make
 
   val verify :
     ?newline:Dkim.newline ->
-    ?size:int ->
+    ?cache_size:int ->
+    ?edns:[ `Auto | `Manual of Dns.Edns.t | `None ] ->
     ?nameservers:Dns.proto * nameserver list ->
     ?timeout:int64 ->
     (string * int * int) stream ->

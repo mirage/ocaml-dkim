@@ -152,11 +152,11 @@ let newline =
 let common_options = "COMMON OPTIONS"
 
 let verbosity =
-  let env = Arg.env_var "SIGN_LOGS" in
+  let env = Cmd.Env.info "SIGN_LOGS" in
   Logs_cli.level ~env ~docs:common_options ()
 
 let renderer =
-  let env = Arg.env_var "SIGN_FMT" in
+  let env = Cmd.Env.info "SIGN_FMT" in
   Fmt_cli.style_renderer ~docs:common_options ~env ()
 
 let reporter ppf =
@@ -213,19 +213,19 @@ let newline =
      default, we assume an UNIX transmission (LF character)." in
   Arg.(value & opt newline Dkim.LF & info [ "newline" ] ~doc)
 
+let term = Term.(const run $ setup_logs $ src $ newline $ nameserver)
+
 let verify =
   let doc = "Verify DKIM-Signature of the given email." in
-  let exits = Term.default_exits in
+  let exits = Cmd.Exit.defaults in
   let man =
     [
       `S Manpage.s_description;
       `P
-        "$(b,verify) does the DKIM verification process. It checks signatures\n\
-        \          and does the DNS request to verify these signatures. Then, \
-         it shows\n\
-        \          which signature is valid which is not.";
+        "$(b,verify) does the DKIM verification process. It checks signatures \
+         and does the DNS request to verify these signatures. Then, it shows \
+         which signature is valid which is not.";
     ] in
-  ( Term.(const run $ setup_logs $ src $ newline $ nameserver),
-    Term.info "sign" ~doc ~exits ~man )
+  Cmd.v (Cmd.info "sign" ~doc ~exits ~man) term
 
-let () = Term.(exit_status @@ eval verify)
+let () = exit @@ Cmd.eval' verify
