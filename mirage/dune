@@ -2,4 +2,4 @@
  (name dkim_mirage)
  (public_name dkim-mirage)
  (libraries dkim mirage-random mirage-time mirage-clock tcpip
-   dns-client.mirage lwt))
+   dns-client-mirage lwt))
