@@ -1,5 +1,5 @@
 opam-version: "2.0"
-name:         "dkim"
+name:         "dkim-bin"
 maintainer:   "Romain Calascibetta <romain.calascibetta@gmail.com>"
 authors:      "Romain Calascibetta <romain.calascibetta@gmail.com>"
 homepage:     "https://github.com/mirage/ocaml-dkim"
@@ -7,8 +7,9 @@ bug-reports:  "https://github.com/mirage/ocaml-dkim/issues"
 dev-repo:     "git+https://github.com/mirage/ocaml-dkim.git"
 doc:          "https://mirage.github.io/ocaml-dkim/"
 license:      "MIT"
-synopsis:     "Implementation of DKIM in OCaml for MirageOS"
-description: """A light layer of the dkim library for MirageOS"""
+synopsis:     "Implementation of DKIM in OCaml"
+description: """A library and a binary to verify and sign an email
+with the DKIM mechanism described by the RFC 6376"""
 
 build: [
   [ "dune" "subst" ] {dev}
@@ -20,15 +21,10 @@ depends: [
   "ocaml"             {>= "4.08.0"}
   "dune"              {>= "2.0.0"}
   "dkim"              {= version}
-  "dns-client-mirage" {>= "7.0.0"}
-  "mirage-time"
-  "mirage-random"
-  "mirage-clock"
-  "tcpip"             {>= "7.0.0"}
-  "lwt"
-  "alcotest"          {with-test}
-  "digestif"          {with-test}
-  "fmt"               {with-test}
-  "logs"              {with-test}
-  "mirage-crypto-rng" {with-test & >= "0.11.0"}
+  "base-unix"
+  "cmdliner"          {>= "1.1.0"}
+  "logs"
+  "fmt"               {>= "0.8.7"}
+  "fpath"
+  "dns-client"
 ]
