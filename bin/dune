@@ -1,7 +1,7 @@
 (executable
  (name verify)
  (public_name dkim.verify)
- (package dkim)
+ (package dkim-bin)
  (modules verify)
  (libraries logs.cli fmt.cli logs.fmt fmt.tty dns-client.unix cmdliner fpath
    digestif.c ipaddr.unix dkim))
@@ -9,7 +9,7 @@
 (executable
  (name sign)
  (public_name dkim.sign)
- (package dkim)
+ (package dkim-bin)
  (modules sign)
  (libraries logs.cli fmt.cli logs.fmt fmt.tty dns-client.unix cmdliner fpath
    digestif.c dkim))
