@@ -2,6 +2,8 @@ module Unix_scheduler = Dkim.Sigs.Make (struct
   type +'a t = 'a
 end)
 
+let error_msgf fmt = Format.kasprintf (fun msg -> Error (`Msg msg)) fmt
+
 module Caml_flow = struct
   type backend = Unix_scheduler.t
   type flow = { ic : in_channel; buf : Buffer.t }
@@ -129,7 +131,7 @@ let input =
     match Fpath.of_string v with
     | Ok path when Sys.file_exists v && not (Sys.is_directory v) ->
         Ok (`Path path)
-    | Ok path -> Rresult.R.error_msgf "%a does not exist" Fpath.pp path
+    | Ok path -> error_msgf "%a does not exist" Fpath.pp path
     | Error _ as err -> err in
   let pp ppf = function
     | `Input -> Fmt.string ppf "-"
@@ -138,7 +140,7 @@ let input =
 
 let output =
   let parser str =
-    let open Rresult in
+    let ( >>| ) x f = Result.map f x in
     Fpath.of_string str >>| fun v -> `Path v in
   let pp ppf = function
     | `Output -> Fmt.string ppf "-"
@@ -150,7 +152,7 @@ let newline =
     match String.lowercase_ascii str with
     | "lf" -> Ok Dkim.LF
     | "crlf" -> Ok Dkim.CRLF
-    | _ -> Rresult.R.error_msgf "Invalid newline specification: %S" str in
+    | _ -> error_msgf "Invalid newline specification: %S" str in
   let pp ppf = function
     | Dkim.LF -> Fmt.string ppf "lf"
     | Dkim.CRLF -> Fmt.string ppf "crlf" in
@@ -158,7 +160,8 @@ let newline =
 
 let private_key =
   let parser str =
-    let open Rresult in
+    let ( >>= ) = Result.bind in
+    let ( >>| ) x f = Result.map f x in
     match
       Base64.decode ~pad:true str
       >>| Cstruct.of_string
@@ -170,7 +173,7 @@ let private_key =
     | Ok path when Sys.file_exists str && not (Sys.is_directory str) ->
         let contents = contents_of_path path in
         X509.Private_key.decode_pem (Cstruct.of_string contents)
-    | Ok path -> R.error_msgf "%a does not exist" Fpath.pp path
+    | Ok path -> error_msgf "%a does not exist" Fpath.pp path
     | Error _ as err -> err in
   let pp ppf pk =
     let contents = X509.Private_key.encode_pem pk in
@@ -187,7 +190,7 @@ let hash =
     match Astring.String.trim (String.lowercase_ascii str) with
     | "sha1" -> Ok `SHA1
     | "sha256" -> Ok `SHA256
-    | _ -> Rresult.R.error_msgf "Invalid hash: %S" str in
+    | _ -> error_msgf "Invalid hash: %S" str in
   let pp ppf = function
     | `SHA1 -> Fmt.string ppf "sha1"
     | `SHA256 -> Fmt.string ppf "sha256" in
@@ -202,8 +205,7 @@ let canon =
     | Some ("simple", "relaxed"), _ -> Ok (`Simple, `Relaxed)
     | Some ("relaxed", "simple"), _ -> Ok (`Relaxed, `Simple)
     | Some ("relaxed", "relaxed"), _ | None, "relaxed" -> Ok (`Relaxed, `Relaxed)
-    | _ -> Rresult.R.error_msgf "Invalid canonicalization specification: %S" str
-  in
+    | _ -> error_msgf "Invalid canonicalization specification: %S" str in
   let pp ppf = function
     | `Simple, `Simple -> Fmt.string ppf "simple"
     | `Relaxed, `Relaxed -> Fmt.string ppf "relaxed"
