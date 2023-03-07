@@ -1,6 +1,6 @@
 module Sigs = Sigs
 
-type (+'a, 'err) or_err = ('a, ([> Rresult.R.msg ] as 'err)) result
+type (+'a, 'err) or_err = ('a, ([> `Msg of string ] as 'err)) result
 type newline = CRLF | LF
 type map
 type signed

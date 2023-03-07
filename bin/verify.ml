@@ -2,6 +2,8 @@ module Unix_scheduler = Dkim.Sigs.Make (struct
   type +'a t = 'a
 end)
 
+let error_msgf fmt = Format.kasprintf (fun msg -> Error (`Msg msg)) fmt
+
 module Caml_flow = struct
   type backend = Unix_scheduler.t
   type flow = { ic : in_channel; buf : Buffer.t }
@@ -78,7 +80,7 @@ let run quiet src newline nameserver =
     | None -> None in
   let dns = Dns_client_unix.create ?nameservers () in
   let flow = Flow.of_input src in
-  let open Rresult in
+  let ( >>= ) = Result.bind in
   Unix_scheduler.prj (Dkim.extract_dkim flow unix (module Flow))
   >>= fun extracted ->
   let r = Queue.create () in
@@ -131,7 +133,7 @@ let input =
     match Fpath.of_string v with
     | Ok path when Sys.file_exists v && not (Sys.is_directory v) ->
         Ok (`Path path)
-    | Ok path -> Rresult.R.error_msgf "%a does not exist" Fpath.pp path
+    | Ok path -> error_msgf "%a does not exist" Fpath.pp path
     | Error _ as err -> err in
   let pp ppf = function
     | `Input -> Fmt.string ppf "-"
@@ -143,7 +145,7 @@ let newline =
     match String.lowercase_ascii str with
     | "lf" -> Ok Dkim.LF
     | "crlf" -> Ok Dkim.CRLF
-    | _ -> Rresult.R.error_msgf "Invalid newline specification: %S" str in
+    | _ -> error_msgf "Invalid newline specification: %S" str in
   let pp ppf = function
     | Dkim.LF -> Fmt.string ppf "lf"
     | Dkim.CRLF -> Fmt.string ppf "crlf" in
@@ -189,9 +191,8 @@ let inet_addr =
       match String.split_on_char ':' str with
       | [ ns ] -> Ok (Unix.inet_addr_of_string ns, 53)
       | [ ns; port ] -> Ok (Unix.inet_addr_of_string ns, int_of_string port)
-      | _ -> Rresult.R.error_msgf "Invalid nameserver IP: %S" str
-    with _exn ->
-      Rresult.R.error_msgf "Nameserver must be a valid IPv4: %S" str in
+      | _ -> error_msgf "Invalid nameserver IP: %S" str
+    with _exn -> error_msgf "Nameserver must be a valid IPv4: %S" str in
   let pp ppf (inet_addr, port) =
     Fmt.pf ppf "%s:%d" (Unix.string_of_inet_addr inet_addr) port in
   Arg.conv (parser, pp)

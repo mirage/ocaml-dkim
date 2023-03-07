@@ -1,5 +1,6 @@
 let () = Mirage_crypto_rng_unix.initialize (module Mirage_crypto_rng.Fortuna)
 let ( <.> ) f g x = f (g x)
+let error_msgf fmt = Format.kasprintf (fun msg -> Error (`Msg msg)) fmt
 
 let reporter ppf =
   let report src level ~over k msgf =
@@ -100,7 +101,7 @@ module Fake_resolver = struct
         Unix_scheduler.inj (Ok [ str ])
     | _ ->
         Unix_scheduler.inj
-          (Rresult.R.error_msgf "domain %a does not exists"
+          (error_msgf "domain %a does not exists"
              Fmt.(Dump.list string)
              (Domain_name.to_strings domain_name))
 end
@@ -159,7 +160,7 @@ let verify dns ic =
       let server_keys, dkim_fields =
         List.fold_left2
           (fun a server_key ((_, _, _) as dkim_field) ->
-            let open Rresult.R in
+            let ( >>= ) = Result.bind in
             match server_key >>= Dkim.post_process_server with
             | Ok server_key -> (server_key, dkim_field) :: a
             | Error (`Msg err) ->
@@ -249,7 +250,7 @@ let test_sign (trust, filename) =
   close_out oc ;
   let ic = open_in (filename ^ ".signed") in
   let server = Dkim.server_of_dkim ~key:priv_of_seed dkim in
-  let domain_name = Rresult.R.get_ok (Dkim.domain_name dkim) in
+  let domain_name = Result.get_ok (Dkim.domain_name dkim) in
   let rs = verify (Some (domain_name, server)) ic in
   match rs with
   | Ok rs ->

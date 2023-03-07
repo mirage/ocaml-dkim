@@ -1,3 +1,10 @@
+### v0.5.0 2023-03-01 Paris (France)
+
+- Separate binaries provided by dkim into a new package `dkim-bin` (@dinosaure, #38)
+- Upgrade tests with `mirage-crypto-rng.0.11.0` (@dinosaure, #38)
+- Adapt to `dns-client.7.0.0` repackaging (@hannesm, #38)
+- Really delete the `rresult` package (@dinosaure, #39)
+
 ### v0.4.0 2022-11-30 Paris (France)
 
 - Upgrade the distribuction with:

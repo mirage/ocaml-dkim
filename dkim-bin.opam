@@ -27,4 +27,5 @@ depends: [
   "fmt"               {>= "0.8.7"}
   "fpath"
   "dns-client"
+  "alcotest"          {with-test}
 ]
