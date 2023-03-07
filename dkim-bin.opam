@@ -21,11 +21,14 @@ depends: [
   "ocaml"             {>= "4.08.0"}
   "dune"              {>= "2.0.0"}
   "dkim"              {= version}
-  "base-unix"
+  "lwt"
+  "tls"
+  "ca-certs"
   "cmdliner"          {>= "1.1.0"}
   "logs"
   "fmt"               {>= "0.8.7"}
   "fpath"
   "dns-client"
+  "dns-client-lwt"    {>= "7.0.0"}
   "alcotest"          {with-test}
 ]

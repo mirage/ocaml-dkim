@@ -3,13 +3,13 @@
  (public_name dkim.verify)
  (package dkim-bin)
  (modules verify)
- (libraries logs.cli fmt.cli logs.fmt fmt.tty dns-client.unix cmdliner fpath
-   digestif.c ipaddr.unix dkim))
+ (libraries logs.cli fmt.cli logs.fmt fmt.tty dns-client-lwt cmdliner fpath
+   lwt lwt.unix tls ca-certs digestif.c ipaddr.unix dkim))
 
 (executable
  (name sign)
  (public_name dkim.sign)
  (package dkim-bin)
  (modules sign)
- (libraries logs.cli fmt.cli logs.fmt fmt.tty dns-client.unix cmdliner fpath
-   digestif.c dkim))
+ (libraries logs.cli fmt.cli logs.fmt fmt.tty dns-client-lwt lwt lwt.unix
+   cmdliner fpath digestif.c dkim))

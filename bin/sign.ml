@@ -1,36 +1,41 @@
-module Unix_scheduler = Dkim.Sigs.Make (struct
-  type +'a t = 'a
+module Lwt_scheduler = Dkim.Sigs.Make (struct
+  type +'a t = 'a Lwt.t
 end)
 
 let error_msgf fmt = Format.kasprintf (fun msg -> Error (`Msg msg)) fmt
 
 module Caml_flow = struct
-  type backend = Unix_scheduler.t
+  type backend = Lwt_scheduler.t
   type flow = { ic : in_channel; buf : Buffer.t }
 
   let input flow buf off len =
     let len = Stdlib.input flow.ic buf off len in
     Buffer.add_string flow.buf (Bytes.sub_string buf off len) ;
-    Unix_scheduler.inj len
+    Lwt_scheduler.inj (Lwt.return len)
 end
 
 module Dns = struct
-  include Dns_client_unix
+  include Dns_client_lwt
 
-  type backend = Unix_scheduler.t
+  type backend = Lwt_scheduler.t
 
   let getaddrinfo t `TXT domain_name =
-    match getaddrinfo t Dns.Rr_map.Txt domain_name with
-    | Ok (_ttl, txtset) ->
-        Unix_scheduler.inj (Ok (Dns.Rr_map.Txt_set.elements txtset))
-    | Error _ as err -> Unix_scheduler.inj err
+    let open Lwt.Infix in
+    getaddrinfo t Dns.Rr_map.Txt domain_name
+    >|= (function
+          | Ok (_ttl, txtset) -> Ok (Dns.Rr_map.Txt_set.elements txtset)
+          | Error _ as err -> err)
+    |> Lwt_scheduler.inj
 end
 
 let ( <.> ) f g x = f (g x)
 
-let unix =
-  let open Unix_scheduler in
-  { Dkim.Sigs.bind = (fun x f -> f (prj x)); return = inj }
+let bind x f =
+  let open Lwt.Infix in
+  Lwt_scheduler.inj (Lwt_scheduler.prj x >>= (Lwt_scheduler.prj <.> f))
+
+let return x = Lwt_scheduler.inj (Lwt.return x)
+let lwt = { Dkim.Sigs.bind; return }
 
 let priv_of_seed seed =
   let g =
@@ -39,7 +44,7 @@ let priv_of_seed seed =
   Mirage_crypto_pk.Rsa.generate ~g ~bits:2048 ()
 
 module Flow = struct
-  type backend = Unix_scheduler.t
+  type backend = Lwt_scheduler.t
   type flow = { ic : in_channel; buffer : Buffer.t; close : bool }
 
   let of_input = function
@@ -48,17 +53,19 @@ module Flow = struct
         let ic = open_in (Fpath.to_string path) in
         { ic; buffer = Buffer.create 0x1000; close = true }
 
-  let close { ic; close; _ } = if close then close_in ic
+  let close { ic; close; _ } =
+    if close then close_in ic ;
+    Lwt_scheduler.inj Lwt.return_unit
 
   let input flow buf off len =
     let len = Stdlib.input flow.ic buf off len in
     Buffer.add_subbytes flow.buffer buf off len ;
-    Unix_scheduler.inj len
+    Lwt_scheduler.inj (Lwt.return len)
 end
 
 module Stream = struct
   type 'a t = 'a Queue.t
-  type backend = Unix_scheduler.t
+  type backend = Lwt_scheduler.t
 
   let create () =
     let q = Queue.create () in
@@ -67,20 +74,22 @@ module Stream = struct
 
   let get q =
     match Queue.pop q with
-    | v -> Unix_scheduler.inj (Some v)
-    | exception _ -> Unix_scheduler.inj None
+    | v -> Lwt_scheduler.inj (Lwt.return_some v)
+    | exception _ -> Lwt_scheduler.inj Lwt.return_none
 end
 
 let both =
   let f a b =
-    let open Unix_scheduler in
-    inj (prj a, prj b) in
+    let open Lwt_scheduler in
+    inj (Lwt.both (prj a) (prj b)) in
   { Dkim.Sigs.f }
 
-let run _ src dst newline private_key seed selector hash canon domain_name =
+let run src dst newline private_key seed selector hash canon domain_name =
   match (private_key, seed) with
-  | None, None -> `Error (true, "A private key or a seed is required")
+  | None, None ->
+      Lwt.return (`Error (true, "A private key or a seed is required"))
   | _ -> (
+      let open Lwt.Syntax in
       let key =
         match (private_key, seed) with
         | Some (`RSA pk), _ -> pk
@@ -89,9 +98,9 @@ let run _ src dst newline private_key seed selector hash canon domain_name =
         (* see below *) in
       let flow = Flow.of_input src in
       let dkim = Dkim.v ~selector ?hash ?canonicalization:canon domain_name in
-      let dkim =
-        Unix_scheduler.prj
-          (Dkim.sign ~key ~newline flow unix ~both
+      let* dkim =
+        Lwt_scheduler.prj
+          (Dkim.sign ~key ~newline flow lwt ~both
              (module Flow)
              (module Stream)
              dkim) in
@@ -101,8 +110,8 @@ let run _ src dst newline private_key seed selector hash canon domain_name =
             match newline with Dkim.LF -> "\n" | Dkim.CRLF -> "\r\n" in
           Fmt.pr "%s" (Prettym.to_string ~new_line Dkim.Encoder.as_field dkim) ;
           Fmt.pr "%s" (Buffer.contents flow.buffer) ;
-          Flow.close flow ;
-          `Ok ()
+          let* () = Lwt_scheduler.prj (Flow.close flow) in
+          Lwt.return (`Ok ())
       | `Path path ->
           let oc = open_out (Fpath.to_string path) in
           let new_line =
@@ -111,8 +120,12 @@ let run _ src dst newline private_key seed selector hash canon domain_name =
             (Prettym.to_string ~new_line Dkim.Encoder.as_field dkim) ;
           output_string oc (Buffer.contents flow.buffer) ;
           close_out oc ;
-          Flow.close flow ;
-          `Ok ())
+          let* () = Lwt_scheduler.prj (Flow.close flow) in
+          Lwt.return (`Ok ()))
+
+let run _ src dst newline private_key seed selector hash canon domain_name =
+  Lwt_main.run
+    (run src dst newline private_key seed selector hash canon domain_name)
 
 let contents_of_path path =
   let ic = open_in (Fpath.to_string path) in
@@ -231,18 +244,21 @@ let dst =
   let doc =
     "The output file where we will store the signed email. If it's omitted, we \
      write on the standard output." in
-  Arg.(value & opt output `Output & info [ "o" ] ~doc)
+  Arg.(value & opt output `Output & info [ "o" ] ~doc ~docv:"<output>")
 
 let newline =
   let doc =
     "Depending on the transmission, an email can use the $(i,CRLF) end-of-line \
      (network transmission) or the LF end-of-line (UNIX transmission). By \
      default, we assume an UNIX transmission (LF character)." in
-  Arg.(value & opt newline Dkim.LF & info [ "newline" ] ~doc)
+  Arg.(value & opt newline Dkim.LF & info [ "newline" ] ~doc ~docv:"<newline>")
 
 let private_key =
   let doc = "The X.509 PEM encoded private key used to sign the email." in
-  Arg.(value & opt (some private_key) None & info [ "p" ] ~doc)
+  Arg.(
+    value
+    & opt (some private_key) None
+    & info [ "p" ] ~doc ~docv:"<private-key>")
 
 let seed =
   let doc =
@@ -250,7 +266,7 @@ let seed =
      can give a seed used then by a Fortuna random number generator to \
      generate a RSA private-key. From the seed, the user is able to reproduce \
      the same RSA private-key (and the public-key). " in
-  Arg.(value & opt (some seed) None & info [ "seed" ] ~doc)
+  Arg.(value & opt (some seed) None & info [ "seed" ] ~doc ~docv:"<seed>")
 
 let selector =
   let doc =
@@ -258,13 +274,16 @@ let selector =
      Each of them are identified by a $(i,selector) such as the public-key is \
      stored into $(i,selector)._domainkey.$(i,domain). It can refer to a date, \
      a location or an user." in
-  Arg.(required & opt (some domain_name) None & info [ "s"; "selector" ] ~doc)
+  Arg.(
+    required
+    & opt (some domain_name) None
+    & info [ "s"; "selector" ] ~doc ~docv:"<selector>")
 
 let hash =
   let doc =
     "Hash algorithm to digest header's fields and body. User can digest with \
      SHA1 or SHA256 algorithm." in
-  Arg.(value & opt (some hash) None & info [ "hash" ] ~doc)
+  Arg.(value & opt (some hash) None & info [ "hash" ] ~doc ~docv:"<hash>")
 
 let canon =
   let doc =
@@ -273,13 +292,16 @@ let canon =
      be used. The format of the argument is: $(i,canon)/$(i,canon) or \
      $(i,canon) to use the same canonicalization for both header's fields and \
      body." in
-  Arg.(value & opt (some canon) None & info [ "c" ] ~doc)
+  Arg.(value & opt (some canon) None & info [ "c" ] ~doc ~docv:"<canon>")
 
 let hostname =
   let doc =
     "The domain where the DNS TXT record is available (which contains the \
      public-key)." in
-  Arg.(required & opt (some domain_name) None & info [ "h"; "hostname" ] ~doc)
+  Arg.(
+    required
+    & opt (some domain_name) None
+    & info [ "h"; "hostname" ] ~doc ~docv:"<hostname>")
 
 let common_options = "COMMON OPTIONS"
 
