@@ -1,37 +1,44 @@
-module Unix_scheduler = Dkim.Sigs.Make (struct
-  type +'a t = 'a
+module Lwt_scheduler = Dkim.Sigs.Make (struct
+  type +'a t = 'a Lwt.t
 end)
 
 let error_msgf fmt = Format.kasprintf (fun msg -> Error (`Msg msg)) fmt
 
 module Caml_flow = struct
-  type backend = Unix_scheduler.t
+  type backend = Lwt_scheduler.t
   type flow = { ic : in_channel; buf : Buffer.t }
 
   let input flow buf off len =
     let len = Stdlib.input flow.ic buf off len in
     Buffer.add_string flow.buf (Bytes.sub_string buf off len) ;
-    Unix_scheduler.inj len
+    Lwt_scheduler.inj (Lwt.return len)
 end
 
 module Dns = struct
-  include Dns_client_unix
+  include Dns_client_lwt
 
-  type backend = Unix_scheduler.t
+  type backend = Lwt_scheduler.t
 
   let gettxtrrecord t domain_name =
-    match getaddrinfo t Dns.Rr_map.Txt domain_name with
-    | Ok (_ttl, txtset) ->
-        Unix_scheduler.inj (Ok (Dns.Rr_map.Txt_set.elements txtset))
-    | Error _ as err -> Unix_scheduler.inj err
+    let open Lwt.Infix in
+    getaddrinfo t Dns.Rr_map.Txt domain_name
+    >|= (function
+          | Ok (_ttl, txtset) -> Ok (Dns.Rr_map.Txt_set.elements txtset)
+          | Error _ as err -> err)
+    |> Lwt_scheduler.inj
 end
 
-let unix =
-  let open Unix_scheduler in
-  { Dkim.Sigs.bind = (fun x f -> f (prj x)); return = inj }
+let ( <.> ) f g x = f (g x)
+
+let bind x f =
+  let open Lwt.Infix in
+  Lwt_scheduler.inj (Lwt_scheduler.prj x >>= (Lwt_scheduler.prj <.> f))
+
+let return x = Lwt_scheduler.inj (Lwt.return x)
+let lwt = { Dkim.Sigs.bind; return }
 
 module Flow = struct
-  type backend = Unix_scheduler.t
+  type backend = Lwt_scheduler.t
   type flow = { ic : in_channel; buffer : Buffer.t; close : bool }
 
   let of_input = function
@@ -40,15 +47,16 @@ module Flow = struct
         let ic = open_in (Fpath.to_string path) in
         { ic; buffer = Buffer.create 0x1000; close = true }
 
-  let close { ic; close; _ } = if close then close_in ic
+  let close { ic; close; _ } =
+    if close then close_in ic ;
+    Lwt_scheduler.inj Lwt.return_unit
 
   let input flow buf off len =
     let len = Stdlib.input flow.ic buf off len in
     Buffer.add_subbytes flow.buffer buf off len ;
-    Unix_scheduler.inj len
+    Lwt_scheduler.inj (Lwt.return len)
 end
 
-let ( <.> ) f g x = f (g x)
 let epoch = Int64.of_float <.> Unix.gettimeofday
 
 let show_result ~valid:v_valid ~invalid:v_invalid =
@@ -69,56 +77,58 @@ let exit_failure = 1
 
 let stream_of_queue q () =
   match Queue.pop q with
-  | v -> Unix_scheduler.inj (Some v)
-  | exception _ -> Unix_scheduler.inj None
+  | v -> Lwt_scheduler.inj (Lwt.return_some v)
+  | exception _ -> Lwt_scheduler.inj Lwt.return_none
 
-let run quiet src newline nameserver =
-  let nameservers =
-    match nameserver with
-    | Some (inet_addr, port) ->
-        Some (`Tcp, [ (Ipaddr_unix.of_inet_addr inet_addr, port) ])
-    | None -> None in
-  let dns = Dns_client_unix.create ?nameservers () in
+let run quiet src newline nameservers =
+  let dns = Dns_client_lwt.create ~nameservers:(`Tcp, nameservers) () in
   let flow = Flow.of_input src in
-  let ( >>= ) = Result.bind in
-  Unix_scheduler.prj (Dkim.extract_dkim flow unix (module Flow))
+  let open Lwt_result.Infix in
+  let open Lwt.Syntax in
+  Lwt_scheduler.prj (Dkim.extract_dkim flow lwt (module Flow))
   >>= fun extracted ->
   let r = Queue.create () in
   let s = Queue.create () in
   let (`Consume th) =
-    Dkim.extract_body ~newline flow unix
+    Dkim.extract_body ~newline flow lwt
       (module Flow)
       ~prelude:extracted.Dkim.prelude
       ~simple:(function Some v -> Queue.push v s | _ -> ())
       ~relaxed:(function Some v -> Queue.push v r | _ -> ()) in
-  let () = Unix_scheduler.prj th in
+  let* () = Lwt_scheduler.prj th in
   let f (valid, invalid) (dkim_field_name, dkim_field_value, m) =
     let fiber =
-      let ( >>= ) = unix.Dkim.Sigs.bind in
-      let return = unix.Dkim.Sigs.return in
+      let ( >>= ) = lwt.Dkim.Sigs.bind in
+      let return = lwt.Dkim.Sigs.return in
       let ( >>? ) x f =
         x >>= function Ok x -> f x | Error err -> return (Error err) in
       Dkim.post_process_dkim m |> return >>? fun dkim ->
-      Dkim.extract_server dns unix (module Dns) dkim >>? fun n ->
+      Dkim.extract_server dns lwt (module Dns) dkim >>? fun n ->
       Dkim.post_process_server n |> return >>? fun server ->
       return (Ok (dkim, server)) in
-    match Unix_scheduler.prj fiber with
+    let* result = Lwt_scheduler.prj fiber in
+    match result with
     | Ok (dkim, server) ->
         let th =
-          Dkim.verify unix ~epoch extracted.Dkim.fields
+          Dkim.verify lwt ~epoch extracted.Dkim.fields
             (dkim_field_name, dkim_field_value)
             ~simple:(stream_of_queue (Queue.copy s))
             ~relaxed:(stream_of_queue (Queue.copy r))
             dkim server in
-        let correct = Unix_scheduler.prj th in
-        if correct then (dkim :: valid, invalid) else (valid, dkim :: invalid)
-    | Error _ -> (valid, invalid) in
-  let valid, invalid = List.fold_left f ([], []) extracted.Dkim.dkim_fields in
+        let* correct = Lwt_scheduler.prj th in
+        if correct
+        then Lwt.return (dkim :: valid, invalid)
+        else Lwt.return (valid, dkim :: invalid)
+    | Error _ -> Lwt.return (valid, invalid) in
+  let* valid, invalid =
+    Lwt_list.fold_left_s f ([], []) extracted.Dkim.dkim_fields in
   if not quiet then show_result ~valid ~invalid ;
-  if List.length invalid = 0 then Ok exit_success else Ok exit_failure
+  if List.length invalid = 0
+  then Lwt.return_ok exit_success
+  else Lwt.return_ok exit_failure
 
-let run quiet src newline nameserver =
-  match run quiet src newline nameserver with
+let run quiet src newline nameservers =
+  match Lwt_main.run (run quiet src newline nameservers) with
   | Ok v -> v
   | Error (`Msg err) ->
       Fmt.epr "%s: @[@%a@]@." Sys.argv.(0) Fmt.string err ;
@@ -154,11 +164,11 @@ let newline =
 let common_options = "COMMON OPTIONS"
 
 let verbosity =
-  let env = Cmd.Env.info "SIGN_LOGS" in
+  let env = Cmd.Env.info "VERIFY_LOGS" in
   Logs_cli.level ~env ~docs:common_options ()
 
 let renderer =
-  let env = Cmd.Env.info "SIGN_FMT" in
+  let env = Cmd.Env.info "VERIFY_FMT" in
   Fmt_cli.style_renderer ~docs:common_options ~env ()
 
 let reporter ppf =
@@ -197,9 +207,54 @@ let inet_addr =
     Fmt.pf ppf "%s:%d" (Unix.string_of_inet_addr inet_addr) port in
   Arg.conv (parser, pp)
 
+let nameserver_of_string str =
+  let ( let* ) = Result.bind in
+  match String.split_on_char ':' str with
+  | "tls" :: rest -> (
+      let str = String.concat ":" rest in
+      match String.split_on_char '!' str with
+      | [ nameserver ] ->
+          let* ipaddr, port =
+            Ipaddr.with_port_of_string ~default:853 nameserver in
+          let* authenticator = Ca_certs.authenticator () in
+          let tls = Tls.Config.client ~authenticator () in
+          Ok (`Tls (tls, ipaddr, port))
+      | nameserver :: authenticator ->
+          let* ipaddr, port =
+            Ipaddr.with_port_of_string ~default:853 nameserver in
+          let authenticator = String.concat "!" authenticator in
+          let* authenticator = X509.Authenticator.of_string authenticator in
+          let time () = Some (Ptime.v (Ptime_clock.now_d_ps ())) in
+          let authenticator = authenticator time in
+          let tls = Tls.Config.client ~authenticator () in
+          Ok (`Tls (tls, ipaddr, port))
+      | [] -> assert false)
+  | "tcp" :: nameserver | nameserver ->
+      let str = String.concat ":" nameserver in
+      let* ipaddr, port = Ipaddr.with_port_of_string ~default:53 str in
+      Ok (`Plaintext (ipaddr, port))
+
 let nameserver =
-  let doc = "IP of nameserver to use." in
-  Arg.(value & opt (some inet_addr) None & info [ "nameserver" ] ~doc)
+  let parser = nameserver_of_string in
+  let pp ppf = function
+    | `Tls (_, ipaddr, 853) ->
+        Fmt.pf ppf "tls:%a!<authenticator>" Ipaddr.pp ipaddr
+    | `Tls (_, ipaddr, port) ->
+        Fmt.pf ppf "tls:%a:%d!<authenticator>" Ipaddr.pp ipaddr port
+    | `Plaintext (ipaddr, 53) -> Fmt.pf ppf "%a" Ipaddr.pp ipaddr
+    | `Plaintext (ipaddr, port) -> Fmt.pf ppf "%a:%d" Ipaddr.pp ipaddr port
+  in
+  Arg.conv (parser, pp) ~docv:"<nameserver>"
+
+let google_com = `Plaintext (Ipaddr.of_string_exn "8.8.8.8", 53)
+
+let nameservers =
+  let doc = "Nameservers used to resolve domain-names." in
+  let env = Cmd.Env.info "VERIFY_NAMESERVERS" in
+  Arg.(
+    value
+    & opt_all nameserver [ google_com ]
+    & info [ "nameserver" ] ~docs:common_options ~doc ~docv:"<nameserver>" ~env)
 
 let src =
   let doc =
@@ -212,9 +267,9 @@ let newline =
     "Depending on the transmission, an email can use the $(i,CRLF) end-of-line \
      (network transmission) or the LF end-of-line (UNIX transmission). By \
      default, we assume an UNIX transmission (LF character)." in
-  Arg.(value & opt newline Dkim.LF & info [ "newline" ] ~doc)
+  Arg.(value & opt newline Dkim.LF & info [ "newline" ] ~doc ~docv:"<newline>")
 
-let term = Term.(const run $ setup_logs $ src $ newline $ nameserver)
+let term = Term.(const run $ setup_logs $ src $ newline $ nameservers)
 
 let verify =
   let doc = "Verify DKIM-Signature of the given email." in
@@ -227,6 +282,6 @@ let verify =
          and does the DNS request to verify these signatures. Then, it shows \
          which signature is valid which is not.";
     ] in
-  Cmd.v (Cmd.info "sign" ~doc ~exits ~man) term
+  Cmd.v (Cmd.info "verify" ~version:"%%VERSION%%" ~doc ~exits ~man) term
 
 let () = exit @@ Cmd.eval' verify
