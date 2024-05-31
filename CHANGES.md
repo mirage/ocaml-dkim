@@ -1,3 +1,8 @@
+### v0.6.0 2024-31-05 Paris (France)
+
+- Improve binaries provided by the distribution (#40, @dinosaure)
+- Upgrade `ocaml-dkim` with `dns-client-mirage.8.0.0` (#42, @dinosaure)
+
 ### v0.5.0 2023-03-01 Paris (France)
 
 - Separate binaries provided by dkim into a new package `dkim-bin` (@dinosaure, #38)
