@@ -117,58 +117,58 @@ let extract_dkim :
     backend state ->
     (module FLOW with type flow = flow and type backend = backend) ->
     ((extracted, _) or_err, backend) io =
-  fun (type flow backend) ?(newline = LF) ?(size = 0x1000) (flow : flow)
-      (state : backend state)
-      (module Flow : FLOW with type flow = flow and type backend = backend) ->
-   let open Mrmime in
-   let ( >>= ) = state.bind in
-   let return = state.return in
-   let raw = Bytes.create size in
-   let decoder = Hd.decoder p in
+ fun (type flow backend) ?(newline = LF) ?(size = 0x1000) (flow : flow)
+     (state : backend state)
+     (module Flow : FLOW with type flow = flow and type backend = backend) ->
+  let open Mrmime in
+  let ( >>= ) = state.bind in
+  let return = state.return in
+  let raw = Bytes.create size in
+  let decoder = Hd.decoder p in
 
-   let rec go others acc =
-     match Hd.decode decoder with
-     | `Field field -> (
-         let (Field.Field (field_name, w, v)) = Location.prj field in
-         match (Field_name.equal field_name field_dkim_signature, w) with
-         | true, Field.Unstructured -> (
-             (* TODO(dinosaure): we should add [DKIM-Signature] into
-              * [others] when it's possible for a given [DKIM-Signature] to
-              * sign an old one. *)
-             let v = to_unstrctrd v in
-             match parse_dkim_field_value v with
-             | Ok dkim -> go others ((field_name, v, dkim) :: acc)
-             | Error (`Msg err) ->
-                 Log.warn (fun m -> m "Ignore DKIM-Signature: %s." err) ;
-                 go others acc)
-         | false, Field.Unstructured ->
-             let v = to_unstrctrd v in
-             go ((field_name, v) :: others) acc
-         (* TODO(dinosaure): [mrmime] tries to parse some specific fields
-          * such as [Date:] with their formats. [p] enforces to parse all
-          * of these fields with [Unstructured].
-          *
-          * So, we can not have something else than [Unstructured] - however,
-          * from the POV of the API, it's not so good to do that (so an update
-          * of [mrmime] should be done). *)
-         | _ -> assert false)
-     | `Malformed _err ->
-         Log.err (fun m -> m "The given email is malformed.") ;
-         return (error_msgf "Invalid email")
-     | `End rest ->
-         return
-           (Ok
-              {
-                prelude = rest;
-                fields = List.rev others;
-                dkim_fields = List.rev acc;
-              })
-     | `Await ->
-         Flow.input flow raw 0 (Bytes.length raw) >>= fun len ->
-         let raw = sanitize_input newline raw len in
-         Hd.src decoder raw 0 (String.length raw) ;
-         go others acc in
-   go [] []
+  let rec go others acc =
+    match Hd.decode decoder with
+    | `Field field -> (
+        let (Field.Field (field_name, w, v)) = Location.prj field in
+        match (Field_name.equal field_name field_dkim_signature, w) with
+        | true, Field.Unstructured -> (
+            (* TODO(dinosaure): we should add [DKIM-Signature] into
+             * [others] when it's possible for a given [DKIM-Signature] to
+             * sign an old one. *)
+            let v = to_unstrctrd v in
+            match parse_dkim_field_value v with
+            | Ok dkim -> go others ((field_name, v, dkim) :: acc)
+            | Error (`Msg err) ->
+                Log.warn (fun m -> m "Ignore DKIM-Signature: %s." err) ;
+                go others acc)
+        | false, Field.Unstructured ->
+            let v = to_unstrctrd v in
+            go ((field_name, v) :: others) acc
+        (* TODO(dinosaure): [mrmime] tries to parse some specific fields
+         * such as [Date:] with their formats. [p] enforces to parse all
+         * of these fields with [Unstructured].
+         *
+         * So, we can not have something else than [Unstructured] - however,
+         * from the POV of the API, it's not so good to do that (so an update
+         * of [mrmime] should be done). *)
+        | _ -> assert false)
+    | `Malformed _err ->
+        Log.err (fun m -> m "The given email is malformed.") ;
+        return (error_msgf "Invalid email")
+    | `End rest ->
+        return
+          (Ok
+             {
+               prelude = rest;
+               fields = List.rev others;
+               dkim_fields = List.rev acc;
+             })
+    | `Await ->
+        Flow.input flow raw 0 (Bytes.length raw) >>= fun len ->
+        let raw = sanitize_input newline raw len in
+        Hd.src decoder raw 0 (String.length raw) ;
+        go others acc in
+  go [] []
 
 type whash = V : 'k Digestif.hash -> whash
 
@@ -811,25 +811,25 @@ let extract_server :
     (module DNS with type t = t and type backend = backend) ->
     _ dkim ->
     ((Map.t, _) or_err, backend) io =
-  fun (type t backend) (t : t) (state : backend state)
-      (module Dns : DNS with type t = t and type backend = backend)
-      (dkim : _ dkim) ->
-   let ( >>= ) = state.bind in
-   let return = state.return in
-   let ( >>? ) x f =
-     x >>= function Ok x -> f x | Error err -> return (Error err) in
+ fun (type t backend) (t : t) (state : backend state)
+     (module Dns : DNS with type t = t and type backend = backend)
+     (dkim : _ dkim) ->
+  let ( >>= ) = state.bind in
+  let return = state.return in
+  let ( >>? ) x f =
+    x >>= function Ok x -> f x | Error err -> return (Error err) in
 
-   let domain_name =
-     let ( >>= ) = Result.bind in
-     Domain_name.prepend_label dkim.d "_domainkey" >>= Domain_name.append dkim.s
-   in
-   return domain_name >>? fun domain_name ->
-   Dns.gettxtrrecord t domain_name >>? fun lst ->
-   (* XXX(dinosaure): RFC 6376 said: Strings in a TXT RR MUST be concatenated
-      together before use with no intervening whitespace. *)
-   let lst = List.map (String.concat "" <.> Astring.String.cuts ~sep:" ") lst in
-   let str = String.concat "" lst in
-   return (parse_dkim_server_value str)
+  let domain_name =
+    let ( >>= ) = Result.bind in
+    Domain_name.prepend_label dkim.d "_domainkey" >>= Domain_name.append dkim.s
+  in
+  return domain_name >>? fun domain_name ->
+  Dns.gettxtrrecord t domain_name >>? fun lst ->
+  (* XXX(dinosaure): RFC 6376 said: Strings in a TXT RR MUST be concatenated
+     together before use with no intervening whitespace. *)
+  let lst = List.map (String.concat "" <.> Astring.String.cuts ~sep:" ") lst in
+  let str = String.concat "" lst in
+  return (parse_dkim_server_value str)
 
 let assoc field_name fields =
   let res = ref None in

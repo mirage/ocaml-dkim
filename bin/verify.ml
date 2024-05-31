@@ -81,7 +81,8 @@ let stream_of_queue q () =
   | exception _ -> Lwt_scheduler.inj Lwt.return_none
 
 let run quiet src newline nameservers =
-  let dns = Dns_client_lwt.create ~nameservers:(`Tcp, nameservers) () in
+  let he = Happy_eyeballs_lwt.create () in
+  let dns = Dns_client_lwt.create ~nameservers:(`Tcp, nameservers) he in
   let flow = Flow.of_input src in
   let open Lwt_result.Infix in
   let open Lwt.Syntax in

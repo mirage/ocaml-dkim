@@ -57,24 +57,18 @@ let ( >>? ) x f =
 
 let lwt = { Dkim.Sigs.bind; return }
 
-module Make
-    (R : Mirage_random.S)
-    (T : Mirage_time.S)
-    (M : Mirage_clock.MCLOCK)
-    (P : Mirage_clock.PCLOCK)
-    (S : Tcpip.Stack.V4V6) =
-struct
+module Make (P : Mirage_clock.PCLOCK) (D : Dns_client_mirage.S) = struct
   type nameserver =
     [ `Plaintext of Ipaddr.t * int | `Tls of Tls.Config.client * Ipaddr.t * int ]
 
-  module DNS = struct
-    include Dns_client_mirage.Make (R) (T) (M) (P) (S)
-
+  module DNS :
+    Dkim.Sigs.DNS with type t = D.t and type backend = Lwt_scheduler.t = struct
+    type t = D.t
     type backend = Lwt_scheduler.t
 
     let gettxtrrecord dns domain_name =
       let open Lwt.Infix in
-      getaddrinfo dns Dns.Rr_map.Txt domain_name >>= function
+      D.getaddrinfo dns Dns.Rr_map.Txt domain_name >>= function
       | Ok (_ttl, txtset) -> Lwt.return_ok (Dns.Rr_map.Txt_set.elements txtset)
       | Error err -> Lwt.return_error err
 
@@ -94,8 +88,7 @@ struct
 
   let is_valid = function `Valid _ -> Lwt.return true | _ -> Lwt.return false
 
-  let server stack ?cache_size ?edns ?nameservers ?timeout dkim =
-    let dns = DNS.create ?cache_size ?edns ?nameservers ?timeout stack in
+  let server (dns : D.t) dkim =
     Lwt_scheduler.prj
     @@ ( Dkim.extract_server dns lwt (module DNS) dkim >>? fun n ->
          Dkim.post_process_server n |> return )
@@ -108,8 +101,7 @@ struct
    *
    * As far as I can tell, such pattern for DKIM does not exist. *)
 
-  let verify ?newline ?cache_size ?edns ?nameservers ?timeout stream stack =
-    let dns = DNS.create ?cache_size ?edns ?nameservers ?timeout stack in
+  let verify ?newline stream dns =
     let q = Queue.create () in
     Dkim.extract_dkim ?newline (Flow.of_stream stream) lwt (module Flow)
     >>? fun extracted ->
@@ -192,9 +184,8 @@ struct
     in
     return (Ok (valids, invalids))
 
-  let verify ?newline ?cache_size ?edns ?nameservers ?timeout stream stack =
-    Lwt_scheduler.prj
-      (verify ?newline ?cache_size ?edns ?nameservers ?timeout stream stack)
+  let verify ?newline stream dns =
+    Lwt_scheduler.prj (verify ?newline stream dns)
 end
 
 (* XXX(dinosaure): this is where we save in the same time the incoming email
