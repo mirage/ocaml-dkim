@@ -218,7 +218,7 @@ let nameserver_of_string str =
           let* ipaddr, port =
             Ipaddr.with_port_of_string ~default:853 nameserver in
           let* authenticator = Ca_certs.authenticator () in
-          let tls = Tls.Config.client ~authenticator () in
+          let* tls = Tls.Config.client ~authenticator () in
           Ok (`Tls (tls, ipaddr, port))
       | nameserver :: authenticator ->
           let* ipaddr, port =
@@ -227,7 +227,7 @@ let nameserver_of_string str =
           let* authenticator = X509.Authenticator.of_string authenticator in
           let time () = Some (Ptime.v (Ptime_clock.now_d_ps ())) in
           let authenticator = authenticator time in
-          let tls = Tls.Config.client ~authenticator () in
+          let* tls = Tls.Config.client ~authenticator () in
           Ok (`Tls (tls, ipaddr, port))
       | [] -> assert false)
   | "tcp" :: nameserver | nameserver ->

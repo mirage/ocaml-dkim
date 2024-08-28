@@ -927,24 +927,24 @@ let verify ({ bind; return } as state) ~epoch fields
     let ( >>= ) = bind in
 
     match
-      (X509.Public_key.decode_der (Cstruct.of_string server.p), fst dkim.a)
+      (X509.Public_key.decode_der server.p, fst dkim.a)
     with
     | Ok (`RSA key), Value.RSA ->
         let digest =
-          `Digest (Cstruct.of_string (Digestif.to_raw_string k hash)) in
+          `Digest (Digestif.to_raw_string k hash) in
         let r0 =
           let b, _ = dkim.signature in
           Mirage_crypto_pk.Rsa.PKCS1.verify ~hashp ~key
-            ~signature:(Cstruct.of_string b) digest in
+            ~signature:b digest in
         Log.debug (fun m -> m "Header fields verified: %b." r0) ;
         verify_body state ~simple ~relaxed dkim >>= fun r1 ->
         Log.debug (fun m -> m "Body verified: %b." r1) ;
         return (r0 && r1)
     | Ok (`ED25519 key), Value.ED25519 ->
-        let msg = Cstruct.of_string (Digestif.to_raw_string k hash) in
+        let msg = Digestif.to_raw_string k hash in
         let r0 =
           let b, _ = dkim.signature in
-          Mirage_crypto_ec.Ed25519.verify ~key (Cstruct.of_string b) ~msg in
+          Mirage_crypto_ec.Ed25519.verify ~key b ~msg in
         Log.debug (fun m -> m "Header fields verified: %b." r0) ;
         verify_body state ~simple ~relaxed dkim >>= fun r1 ->
         Log.debug (fun m -> m "Body verified: %b." r1) ;
@@ -967,7 +967,7 @@ let dkim_field_and_value =
 let server_of_dkim : key:Mirage_crypto_pk.Rsa.priv -> 'a dkim -> server =
  fun ~key dkim ->
   let pub = Mirage_crypto_pk.Rsa.pub_of_priv key in
-  let p = Cstruct.to_string (X509.Public_key.encode_der (`RSA pub)) in
+  let p = X509.Public_key.encode_der (`RSA pub) in
   let k, h = dkim.a in
   { v = "DKIM1"; h = [ h ]; n = None; k; p; s = [ Value.All ]; t = [] }
 
@@ -1100,7 +1100,7 @@ let sign :
     | Error _ -> assert false in
   canon field_dkim_signature unstrctrd (fun x -> Queue.push x q) ;
   let (H (k, vhash)) = digesti (fun f -> Queue.iter f q) in
-  let message = `Digest (Cstruct.of_string (Digestif.to_raw_string k vhash)) in
+  let message = `Digest (Digestif.to_raw_string k vhash) in
   let hash =
     match k with
     | Digestif.SHA1 -> `SHA1
@@ -1111,5 +1111,4 @@ let sign :
     | Digestif.MD5 -> `MD5
     | _ -> Fmt.invalid_arg "Unrecognized hash" in
   let signature = Mirage_crypto_pk.Rsa.PKCS1.sign ~hash ~key message in
-  let signature = Cstruct.to_string signature in
   return { dkim' with signature = (signature, bh) }

@@ -46,9 +46,7 @@ let sjc2__domainkey_discoursemail_com =
 let seed = Base64.decode_exn "Do8KdmOYnU7yzqDn3A3lJwwXPaa1NRdv6E9R2KgZyXg="
 
 let priv_of_seed =
-  let g =
-    let seed = Cstruct.of_string seed in
-    Mirage_crypto_rng.(create ~seed (module Fortuna)) in
+  let g = Mirage_crypto_rng.(create ~seed (module Fortuna)) in
   Mirage_crypto_pk.Rsa.generate ~g ~bits:2048 ()
 
 let mails =

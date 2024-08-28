@@ -38,9 +38,7 @@ let return x = Lwt_scheduler.inj (Lwt.return x)
 let lwt = { Dkim.Sigs.bind; return }
 
 let priv_of_seed seed =
-  let g =
-    let seed = Cstruct.of_string seed in
-    Mirage_crypto_rng.(create ~seed (module Fortuna)) in
+  let g = Mirage_crypto_rng.(create ~seed (module Fortuna)) in
   Mirage_crypto_pk.Rsa.generate ~g ~bits:2048 ()
 
 module Flow = struct
@@ -174,10 +172,8 @@ let newline =
 let private_key =
   let parser str =
     let ( >>= ) = Result.bind in
-    let ( >>| ) x f = Result.map f x in
     match
       Base64.decode ~pad:true str
-      >>| Cstruct.of_string
       >>= X509.Private_key.decode_der
     with
     | Ok _ as v -> v
@@ -185,12 +181,12 @@ let private_key =
     match Fpath.of_string str with
     | Ok path when Sys.file_exists str && not (Sys.is_directory str) ->
         let contents = contents_of_path path in
-        X509.Private_key.decode_pem (Cstruct.of_string contents)
+        X509.Private_key.decode_pem contents
     | Ok path -> error_msgf "%a does not exist" Fpath.pp path
     | Error _ as err -> err in
   let pp ppf pk =
     let contents = X509.Private_key.encode_pem pk in
-    Fmt.pf ppf "%s%!" (Cstruct.to_string contents) in
+    Fmt.pf ppf "%s%!" contents in
   Arg.conv (parser, pp)
 
 let domain_name =
