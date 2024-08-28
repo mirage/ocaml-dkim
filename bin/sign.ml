@@ -172,10 +172,7 @@ let newline =
 let private_key =
   let parser str =
     let ( >>= ) = Result.bind in
-    match
-      Base64.decode ~pad:true str
-      >>= X509.Private_key.decode_der
-    with
+    match Base64.decode ~pad:true str >>= X509.Private_key.decode_der with
     | Ok _ as v -> v
     | Error _ ->
     match Fpath.of_string str with

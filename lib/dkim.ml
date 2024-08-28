@@ -926,16 +926,13 @@ let verify ({ bind; return } as state) ~epoch fields
       | _, _ -> false in
     let ( >>= ) = bind in
 
-    match
-      (X509.Public_key.decode_der server.p, fst dkim.a)
-    with
+    match (X509.Public_key.decode_der server.p, fst dkim.a) with
     | Ok (`RSA key), Value.RSA ->
-        let digest =
-          `Digest (Digestif.to_raw_string k hash) in
+        let digest = `Digest (Digestif.to_raw_string k hash) in
         let r0 =
           let b, _ = dkim.signature in
-          Mirage_crypto_pk.Rsa.PKCS1.verify ~hashp ~key
-            ~signature:b digest in
+          Mirage_crypto_pk.Rsa.PKCS1.verify ~hashp ~key ~signature:b digest
+        in
         Log.debug (fun m -> m "Header fields verified: %b." r0) ;
         verify_body state ~simple ~relaxed dkim >>= fun r1 ->
         Log.debug (fun m -> m "Body verified: %b." r1) ;
