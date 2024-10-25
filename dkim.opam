@@ -39,7 +39,3 @@ depends: [
   "mirage-crypto-rng" {with-test & >= "1.0.0"}
   "alcotest"          {with-test}
 ]
-
-pin-depends: [
-  [ "mrmime.0.7.0" "git+https://github.com/hannesm/mrmime.git#60dc0cd3befab0af6c0418d97c3927fe9ec5650b" ]
-]

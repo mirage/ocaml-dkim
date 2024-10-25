@@ -1,3 +1,7 @@
+### v0.7.0 2024-09-18 - Paris (France)
+
+- Remove `mirage-random` and upgrade to `tls.1.0.0` (@hannesm, @dinosaure, #44)
+
 ### v0.6.0 2024-31-05 Paris (France)
 
 - Improve binaries provided by the distribution (#40, @dinosaure)
