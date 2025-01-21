@@ -181,8 +181,8 @@ let tag_name =
 
 let tag_value = take_while1 is_valchar
 
-let tag_spec :
-    type v. tag_name:v Map.key t -> tag_value:v t -> (v Map.key * v option) t =
+let tag_spec : type v.
+    tag_name:v Map.key t -> tag_value:v t -> (v Map.key * v option) t =
  fun ~tag_name ~tag_value ->
   tag_name <* char '=' >>= fun name ->
   option None (tag_value >>| Option.some) >>= fun value -> return (name, value)
@@ -330,6 +330,10 @@ let z =
     many (char '|' *> sig_z_tag_copy) >>= fun r -> return (x :: r) in
   tag_spec ~tag_name ~tag_value >>| binding
 
+let unknown =
+  let tag_name = take_while1 is_alpha >>| fun _ -> Map.K.unknown in
+  tag_spec ~tag_name ~tag_value >>| binding
+
 let mail_tag_list =
   let tag_spec =
     bh
@@ -345,15 +349,15 @@ let mail_tag_list =
     <|> s
     <|> t
     <|> x
-    <|> z in
+    <|> z
+    <|> unknown in
   tag_spec >>= function
   | Some (Map.B (k, v)) ->
       many (char ';' *> tag_spec)
       <* option () (char ';' *> return ())
       >>| List.fold_left
             (fun hmap -> function
-              | Some (Map.B (k, v)) -> Map.add k v hmap
-              | None -> hmap)
+              | Some (Map.B (k, v)) -> Map.add k v hmap | None -> hmap)
             (Map.singleton k v)
   | None -> failf "Expect at least one tag"
 
@@ -421,7 +425,6 @@ let server_tag_list =
       <* option () (char ';' *> return ())
       >>| List.fold_left
             (fun hmap -> function
-              | Some (Map.B (k, v)) -> Map.add k v hmap
-              | None -> hmap)
+              | Some (Map.B (k, v)) -> Map.add k v hmap | None -> hmap)
             (Map.singleton k v)
   | None -> failf "Expect at least one tag"
