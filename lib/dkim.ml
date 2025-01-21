@@ -20,7 +20,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let trim unstrctrd =
   let fold acc = function
-    | `WSP _ | `FWS _ | `CR | `LF -> acc
+    | `FWS _ | `CR | `LF | `WSP _ -> acc
     | elt -> elt :: acc in
   Unstrctrd.fold ~f:fold [] unstrctrd |> List.rev |> Unstrctrd.of_list
   |> function
@@ -127,7 +127,7 @@ let extract_dkim : type flow backend.
 
   let rec go others acc =
     match Hd.decode decoder with
-    | `Field field -> (
+    | `Field field -> begin
         let (Field.Field (field_name, w, v)) = Location.prj field in
         match (Field_name.equal field_name field_dkim_signature, w) with
         | true, Field.Unstructured -> (
@@ -150,9 +150,10 @@ let extract_dkim : type flow backend.
          * So, we can not have something else than [Unstructured] - however,
          * from the POV of the API, it's not so good to do that (so an update
          * of [mrmime] should be done). *)
-        | _ -> assert false)
-    | `Malformed _err ->
-        Log.err (fun m -> m "The given email is malformed.") ;
+        | _ -> assert false
+      end
+    | `Malformed err ->
+        Log.err (fun m -> m "The given email is malformed: %s" err) ;
         return (error_msgf "Invalid email")
     | `End rest ->
         return
