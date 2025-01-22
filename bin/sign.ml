@@ -22,9 +22,9 @@ module Dns = struct
   let getaddrinfo t `TXT domain_name =
     let open Lwt.Infix in
     getaddrinfo t Dns.Rr_map.Txt domain_name
-    >|= (function
-          | Ok (_ttl, txtset) -> Ok (Dns.Rr_map.Txt_set.elements txtset)
-          | Error _ as err -> err)
+    >|= ( function
+    | Ok (_ttl, txtset) -> Ok (Dns.Rr_map.Txt_set.elements txtset)
+    | Error _ as err -> err )
     |> Lwt_scheduler.inj
 end
 

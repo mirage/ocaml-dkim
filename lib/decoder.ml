@@ -6,7 +6,9 @@ let is_alpha = function 'a' .. 'z' | 'A' .. 'Z' -> true | _ -> false
 let is_plus = ( = ) '+'
 let is_slash = ( = ) '/'
 let is_dash = ( = ) '-'
+let is_underscore = ( = ) '_'
 let is_equal = ( = ) '='
+let is_semicolon = ( = ) ';'
 let ( or ) f g x = f x || g x
 let is_base64 = is_digit or is_alpha or is_plus or is_slash or is_equal
 
@@ -26,7 +28,24 @@ let is_ftext = function
       DKIM-Signature (which use this character as seperator). *)
   | _ -> false
 
-let field_name = take_while1 is_ftext >>| Mrmime.Field_name.v
+let is_ftext0 = is_ftext or is_semicolon
+
+let is_ftext1 = function
+  | '\033' .. '\057' | '\060' .. '\064' | '\091' .. '\096' | '\123' .. '\126' ->
+      true
+  | _ -> false
+
+let field_name1 = take_while1 is_ftext >>| fun str -> Mrmime.Field_name.v str
+
+let field_name0 =
+  let rec go acc =
+    peek_string 2 >>= fun sep ->
+    if is_ftext0 sep.[0] && is_ftext1 sep.[1]
+    then advance 1 *> take_while1 is_ftext >>= fun res -> go (acc ^ ";" ^ res)
+    else return acc in
+  take_while1 is_ftext >>= go
+
+let field_name0 = field_name0 >>| fun str -> Mrmime.Field_name.v str
 
 (* XXX(dinosaure): [local-part] and [sub-domain] from [colombe]. See RFC 6376:
 
@@ -38,7 +57,7 @@ let field_name = take_while1 is_ftext >>| Mrmime.Field_name.v
 let let_dig = satisfy (is_alpha or is_digit)
 
 let ldh_str =
-  take_while1 (is_alpha or is_digit or is_dash) >>= fun res ->
+  take_while1 (is_alpha or is_digit or is_dash or is_underscore) >>= fun res ->
   if res.[String.length res - 1] <> '-'
   then return res
   else fail "Invalid ldh-str token"
@@ -107,7 +126,7 @@ let hyphenated_word =
 
     hdr-name        =  field-name
 *)
-let hdr_name = field_name
+let hdr_name = field_name1
 let rsa = string "rsa" *> return Value.RSA
 let sha1 = string "sha1" *> return Value.SHA1
 let sha256 = string "sha256" *> return Value.SHA256
@@ -132,6 +151,10 @@ let hash_extension : Value.hash t =
                               ; hex-octet is from RFC2045
     dkim-safe-char        =  %x21-3A / %x3C / %x3E-7E
                               ; '!' - ':', '<', '>' - '~'
+
+    hex-octet = '=' ('0' .. '9' | 'A' .. 'F'){2}
+
+    TODO(dinosaure): this implementation is not complete...
 *)
 let dkim_quoted_printable =
   let is_hex = function '0' .. '9' | 'A' .. 'F' -> true | _ -> false in
@@ -181,8 +204,8 @@ let tag_name =
 
 let tag_value = take_while1 is_valchar
 
-let tag_spec :
-    type v. tag_name:v Map.key t -> tag_value:v t -> (v Map.key * v option) t =
+let tag_spec : type v.
+    tag_name:v Map.key t -> tag_value:v t -> (v Map.key * v option) t =
  fun ~tag_name ~tag_value ->
   tag_name <* char '=' >>= fun name ->
   option None (tag_value >>| Option.some) >>= fun value -> return (name, value)
@@ -217,14 +240,22 @@ let b =
       "=" [ [FWS] "=" ] ]. Definition of the hell, a pre-processing is needed in
       this case to concat fragments separated by [FWS]. *)
   let tag_name = string "b" >>| fun _ -> Map.K.b in
-  let tag_value = take_while1 is_base64 >>= fun str -> return str in
+  let tag_value =
+    take_while1 is_base64 >>= fun str ->
+    let str = String.split_on_char ' ' str in
+    let str = String.concat "" str in
+    return str in
   tag_spec ~tag_name ~tag_value >>| fun v -> binding v
 
 (* sig-bh-tag      = %x62 %x68 [FWS] "=" [FWS] sig-bh-tag-data
     sig-bh-tag-data = base64string *)
 let bh =
   let tag_name = string "bh" >>| fun _ -> Map.K.bh in
-  let tag_value = take_while1 is_base64 in
+  let tag_value =
+    take_while1 is_base64 >>= fun str ->
+    let str = String.split_on_char ' ' str in
+    let str = String.concat "" str in
+    return str in
   tag_spec ~tag_name ~tag_value >>| binding
 
 (* sig-c-tag       = %x63 [FWS] "=" [FWS] sig-c-tag-alg
@@ -257,8 +288,8 @@ let d =
 let h =
   let tag_name = string "h" >>| fun _ -> Map.K.h in
   let tag_value =
-    hdr_name >>= fun x ->
-    many (char ':' *> hdr_name) >>= fun r -> return (x :: r) in
+    field_name0 >>= fun x ->
+    many (char ':' *> field_name1) >>= fun r -> return (x :: r) in
   tag_spec ~tag_name ~tag_value >>| binding
 
 (* sig-i-tag       = %x69 [FWS] "=" [FWS] [ Local-part ]
@@ -330,6 +361,10 @@ let z =
     many (char '|' *> sig_z_tag_copy) >>= fun r -> return (x :: r) in
   tag_spec ~tag_name ~tag_value >>| binding
 
+let unknown =
+  let tag_name = take_while1 is_alpha >>| fun _ -> Map.K.unknown in
+  tag_spec ~tag_name ~tag_value >>| binding
+
 let mail_tag_list =
   let tag_spec =
     bh
@@ -345,15 +380,15 @@ let mail_tag_list =
     <|> s
     <|> t
     <|> x
-    <|> z in
+    <|> z
+    <|> unknown in
   tag_spec >>= function
   | Some (Map.B (k, v)) ->
       many (char ';' *> tag_spec)
       <* option () (char ';' *> return ())
       >>| List.fold_left
             (fun hmap -> function
-              | Some (Map.B (k, v)) -> Map.add k v hmap
-              | None -> hmap)
+              | Some (Map.B (k, v)) -> Map.add k v hmap | None -> hmap)
             (Map.singleton k v)
   | None -> failf "Expect at least one tag"
 
@@ -384,7 +419,11 @@ let n =
 
 let p =
   let tag_name = string "p" >>| fun _ -> Map.K.p in
-  let tag_value = take_while1 is_base64 in
+  let tag_value =
+    take_while1 is_base64 >>= fun str ->
+    let str = String.split_on_char ' ' str in
+    let str = String.concat "" str in
+    return str in
   tag_spec ~tag_name ~tag_value >>| binding
 
 let key_s_tag_type =
@@ -421,7 +460,6 @@ let server_tag_list =
       <* option () (char ';' *> return ())
       >>| List.fold_left
             (fun hmap -> function
-              | Some (Map.B (k, v)) -> Map.add k v hmap
-              | None -> hmap)
+              | Some (Map.B (k, v)) -> Map.add k v hmap | None -> hmap)
             (Map.singleton k v)
   | None -> failf "Expect at least one tag"

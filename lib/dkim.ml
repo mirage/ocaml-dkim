@@ -20,7 +20,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let trim unstrctrd =
   let fold acc = function
-    | `WSP _ | `FWS _ | `CR | `LF -> acc
+    | `FWS _ | `CR | `LF | `WSP _ -> acc
     | elt -> elt :: acc in
   Unstrctrd.fold ~f:fold [] unstrctrd |> List.rev |> Unstrctrd.of_list
   |> function
@@ -109,8 +109,7 @@ let p =
   |> Map.add content_type unstructured
   |> Map.add content_encoding unstructured
 
-let extract_dkim :
-    type flow backend.
+let extract_dkim : type flow backend.
     ?newline:newline ->
     ?size:int ->
     flow ->
@@ -128,7 +127,7 @@ let extract_dkim :
 
   let rec go others acc =
     match Hd.decode decoder with
-    | `Field field -> (
+    | `Field field -> begin
         let (Field.Field (field_name, w, v)) = Location.prj field in
         match (Field_name.equal field_name field_dkim_signature, w) with
         | true, Field.Unstructured -> (
@@ -151,9 +150,10 @@ let extract_dkim :
          * So, we can not have something else than [Unstructured] - however,
          * from the POV of the API, it's not so good to do that (so an update
          * of [mrmime] should be done). *)
-        | _ -> assert false)
-    | `Malformed _err ->
-        Log.err (fun m -> m "The given email is malformed.") ;
+        | _ -> assert false
+      end
+    | `Malformed err ->
+        Log.err (fun m -> m "The given email is malformed: %s" err) ;
         return (error_msgf "Invalid email")
     | `End rest ->
         return
@@ -179,8 +179,8 @@ let pp_hash ppf (V hash) =
   | SHA256 -> Fmt.string ppf "sha256"
   | _ -> assert false
 
-let equal_hash :
-    type a b. a Digestif.hash -> b Digestif.hash -> (a, b) Refl.t option =
+let equal_hash : type a b.
+    a Digestif.hash -> b Digestif.hash -> (a, b) Refl.t option =
  fun a b ->
   let open Digestif in
   match (a, b) with
@@ -664,8 +664,7 @@ let crlf digest n =
 type iter = string Digestif.iter
 type body = { relaxed : iter; simple : iter }
 
-let extract_body :
-    type flow backend.
+let extract_body : type flow backend.
     ?newline:newline ->
     flow ->
     backend state ->
@@ -762,8 +761,7 @@ let remove_signature_of_raw_dkim unstrctrd =
 
 type ('a, 'backend) stream = unit -> ('a option, 'backend) io
 
-let rec fold :
-    type backend.
+let rec fold : type backend.
     backend state ->
     f:(string -> 'a -> ('a, backend) io) ->
     (string, backend) stream ->
@@ -775,8 +773,7 @@ let rec fold :
   | Some str -> f str acc >>= fold state ~f stream
   | None -> return acc
 
-let digest :
-    type backend.
+let digest : type backend.
     backend state -> whash -> (string, backend) stream -> (vhash, backend) io =
  fun ({ bind; return } as state) (V hash) stream ->
   let ( >>= ) = bind in
@@ -785,8 +782,7 @@ let digest :
   fold state ~f stream Digest.empty >>= fun ctx ->
   return (H (hash, Digestif.of_digest (module Digest) (Digest.get ctx)))
 
-let body_hash_of_dkim :
-    type backend.
+let body_hash_of_dkim : type backend.
     backend state ->
     simple:(string, backend) stream ->
     relaxed:(string, backend) stream ->
@@ -804,8 +800,7 @@ let body_hash_of_dkim :
   | Value.Canonicalization_ext x ->
       Fmt.invalid_arg "%s canonicalisation is not supported" x
 
-let extract_server :
-    type t backend.
+let extract_server : type t backend.
     t ->
     backend state ->
     (module DNS with type t = t and type backend = backend) ->
@@ -907,9 +902,10 @@ let verify ({ bind; return } as state) ~epoch fields
     (dkim_signature : Mrmime.Field_name.t * Unstrctrd.t) ~simple ~relaxed dkim
     server =
   if expired ~epoch dkim
-  then (
+  then begin
     Log.warn (fun m -> m "The given DKIM-Signature expired.") ;
-    return true (* XXX(dinosaure): check if the signature is not expired. *))
+    return true (* XXX(dinosaure): check if the signature is not expired. *)
+  end
   else
     let (H (k, hash)) = data_hash_of_dkim fields dkim_signature dkim in
     Log.debug (fun m ->
@@ -1016,8 +1012,7 @@ let domain_name :
   let ( >>= ) = Result.bind in
   Domain_name.prepend_label dkim.d "_domainkey" >>= Domain_name.append dkim.s
 
-let sign :
-    type flow backend.
+let sign : type flow backend.
     key:Mirage_crypto_pk.Rsa.priv ->
     ?newline:newline ->
     flow ->

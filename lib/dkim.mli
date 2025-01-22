@@ -120,7 +120,8 @@ val verify :
 
     At least, [dkim] provides some logs to highlight where the verification
     failed. Finally, the given email should be treated the same as all
-    unverified email - regardless of whether or not it looks like it was signed. *)
+    unverified email - regardless of whether or not it looks like it was signed.
+*)
 
 type algorithm = [ `RSA ]
 type hash = [ `SHA1 | `SHA256 ]

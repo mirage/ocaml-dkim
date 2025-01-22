@@ -66,4 +66,6 @@ module K = struct
 
   let st : name list key =
     Key.create { name = "names"; pp = Fmt.Dump.list Value.pp_name }
+
+  let unknown : string key = Key.create { name = "unknown"; pp = Fmt.string }
 end
