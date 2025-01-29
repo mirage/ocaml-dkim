@@ -1,11 +1,11 @@
-let computation = Dkim.remove_signature_of_raw_dkim
+let computation = Dkim.remove_signature_of_dkim
 
 let v str =
   let _, v = Unstrctrd.safely_decode str in
   v
 
 let rem str =
-  let res = Dkim.remove_signature_of_raw_dkim (v str) in
+  let res = Dkim.remove_signature_of_dkim (v str) in
   Unstrctrd.to_utf_8_string res
 
 let test_0 =

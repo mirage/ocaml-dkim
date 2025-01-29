@@ -175,6 +175,6 @@ let decoder () =
     i_pos = 1;
     i_len = 0;
     has_cr = false;
-    b = Buffer.create 16;
+    b = Buffer.create 0x7ff;
     k = t_decode;
   }

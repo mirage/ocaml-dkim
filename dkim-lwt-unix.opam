@@ -1,0 +1,26 @@
+opam-version: "2.0"
+name:         "dkim"
+maintainer:   "Romain Calascibetta <romain.calascibetta@gmail.com>"
+authors:      "Romain Calascibetta <romain.calascibetta@gmail.com>"
+homepage:     "https://github.com/mirage/ocaml-dkim"
+bug-reports:  "https://github.com/mirage/ocaml-dkim/issues"
+dev-repo:     "git+https://github.com/mirage/ocaml-dkim.git"
+doc:          "https://mirage.github.io/ocaml-dkim/"
+license:      "MIT"
+synopsis:     "Implementation of DKIM in OCaml with LWT"
+description: """A library and a binary to verify and sign an email
+with the DKIM mechanism described by the RFC 6376"""
+
+build: [
+  [ "dune" "subst" ] {dev}
+  [ "dune" "build" "-p" name "-j" jobs ]
+  [ "dune" "runtest" "-p" name "-j" jobs ] {with-test}
+]
+
+depends: [
+  "ocaml"             {>= "4.08.0"}
+  "dune"              {>= "2.0.0"}
+  "dkim"              {= version}
+  "lwt"
+  "dns-client-lwt"
+]
