@@ -1,132 +1,15 @@
-module Sigs = Sigs
+type 'a t
+and signed
+and unsigned
 
-type (+'a, 'err) or_err = ('a, ([> `Msg of string ] as 'err)) result
-type newline = CRLF | LF
-type map
-type signed
-type unsigned
-type 'a dkim
-type server
-type body
-
-val pp_dkim : 'a dkim Fmt.t
-val pp_server : server Fmt.t
-val equal_server : server -> server -> bool
-
-type extracted = {
-  dkim_fields : (Mrmime.Field_name.t * Unstrctrd.t * map) list;
-  fields : (Mrmime.Field_name.t * Unstrctrd.t) list;
-  prelude : string;
-}
-
-val extract_dkim :
-  ?newline:newline ->
-  ?size:int ->
-  'flow ->
-  't Sigs.state ->
-  (module Sigs.FLOW with type flow = 'flow and type backend = 't) ->
-  ((extracted, _) or_err, 't) Sigs.io
-(** [extract_dkim ?newline flow state (module Flow)] reads [flow] with
-    Input/Output scheduler represented by [state] and primitives implemented by
-    [(module Flow)]. [?newline] specifies kind of contents ([CRLF] from network
-    or [LF] from database like {i maildir}).
-
-    It tries to extract [DKIM-Signature] fields with values, others fields and
-    give a prelude of the body of the email (given by [flow]). *)
-
-val post_process_dkim : map -> (signed dkim, _) or_err
-(** [post_process_dkim map] from an already parsed [DKIM-Signature] represented
-    by {!map}, we compute a post process analyze (check required/optional well
-    formed values) and return a safe representation of [DKIM-Signature],
-    {!dkim}, which can be used by {!verify}. *)
-
-val selector : 'a dkim -> [ `raw ] Domain_name.t
-(** [selector dkim] returns the selector of the DKIM-Signature field.
-
-    Selectors might indicate the names of office locations, the signing date, or
-    even an individual user. *)
-
-val domain : 'a dkim -> [ `raw ] Domain_name.t
-(** [domain dkim] returns the domain which signed the mail. *)
-
-val fields : 'a dkim -> Mrmime.Field_name.t list
-
-val domain_name :
-  'a dkim -> ([ `raw ] Domain_name.t, [> `Msg of string ]) result
-(** [domain_name dkim] returns the full domain-name where the DNS TXT record can
-    be get. *)
-
-val extract_server :
-  't ->
-  'backend Sigs.state ->
-  (module Sigs.DNS with type t = 't and type backend = 'backend) ->
-  'a dkim ->
-  ((map, _) or_err, 'backend) Sigs.io
-(** [extract_server dns state (module Dns) dkim] gets public-key noticed by
-    [dkim] from authority server over DNS protocol (with Input/Output scheduler
-    represented by [state] and primitives implemented by [(module Dns)]). *)
-
-val post_process_server : map -> (server, _) or_err
-(** [post_process_server map] from an already parsed TXT record (given by a DNS
-    service) represented by {!map}, we compute a post-process analyze (check
-    required/optional well formed values) and return a safe representation of
-    the public-key, {!server}, which can be used by {!verify}. *)
-
-val extract_body :
-  ?newline:newline ->
-  'flow ->
-  'backend Sigs.state ->
-  (module Sigs.FLOW with type flow = 'flow and type backend = 'backend) ->
-  prelude:string ->
-  simple:(string option -> unit) ->
-  relaxed:(string option -> unit) ->
-  [ `Consume of (unit, 'backend) Sigs.io ]
-(** [extract_body ?newline flow state (module Flow) ~prelude] extracts a thin
-    representation of the body of the email. It should follow {!extract_dkim}
-    with [prelude] and with [flow], [state], [(module Flow)] and [?newline]
-    arguments. It returns a {!body} which can be used by {!verify}. *)
-
-val expired : epoch:(unit -> int64) -> signed dkim -> bool
-(** [expired ~epoch dkim] returns [true] if the signature is expired. [verify]
-    with the given [dkim] will returns [true] but it does not process the real
-    verification, which will obviously fails otherwise due to the obsolete
-    public/private key available by the signer. *)
-
-type ('a, 'backend) stream = unit -> ('a option, 'backend) Sigs.io
-
-val verify :
-  'backend Sigs.state ->
-  epoch:(unit -> int64) ->
-  (Mrmime.Field_name.t * Unstrctrd.t) list ->
-  Mrmime.Field_name.t * Unstrctrd.t ->
-  simple:(string, 'backend) stream ->
-  relaxed:(string, 'backend) stream ->
-  signed dkim ->
-  server ->
-  (bool, 'backend) Sigs.io
-(** [verify fields (dkim_field_name, dkim_value) dkim server body] verifies the
-    given email (represented by {!body}. [fields] and
-    [(dkim_field_name, dkim_value)]) with a signature {!dkim} and the public-key
-    represented by {!server}.
-
-    It returns [true] if signature is correct or [false] if something is wrong.
-
-    Establishing the exact cause of a failed verification if difficult:
-
-    - [selector] can not be found.
-    - Public-key was updated.
-    - [DKIM-Signature] is not well-formed.
-    - etc.
-
-    At least, [dkim] provides some logs to highlight where the verification
-    failed. Finally, the given email should be treated the same as all
-    unverified email - regardless of whether or not it looks like it was signed.
-*)
-
-type algorithm = [ `RSA ]
+type algorithm = [ `RSA | `Ed25519 ]
 type hash = [ `SHA1 | `SHA256 ]
 type canonicalization = [ `Simple | `Relaxed ]
 type query = [ `DNS of [ `TXT ] ]
+
+type key =
+  [ `Rsa of Mirage_crypto_pk.Rsa.priv
+  | `Ed25519 of Mirage_crypto_ec.Ed25519.priv ]
 
 val v :
   ?version:int ->
@@ -140,55 +23,76 @@ val v :
   ?timestamp:int64 ->
   ?expiration:int64 ->
   [ `raw ] Domain_name.t ->
-  unsigned dkim
+  unsigned t
 
-module Encoder : sig
-  val dkim_signature : signed dkim Prettym.t
-  val as_field : signed dkim Prettym.t
+val fields : 'a t -> Mrmime.Field_name.t list
+val expire : 'a t -> int64 option
+val body : signed t -> string
+val domain : 'a t -> [ `raw ] Domain_name.t
+val selector : 'a t -> [ `raw ] Domain_name.t
+val domain_name : 'a t -> ([ `raw ] Domain_name.t, [> `Msg of string ]) result
+
+type domain_key
+
+val domain_key_of_string : string -> (domain_key, [> `Msg of string ]) result
+val domain_key_of_dkim : key:key -> _ t -> domain_key
+val domain_key_to_string : domain_key -> string
+val equal_domain_key : domain_key -> domain_key -> bool
+
+module Verify : sig
+  type decoder
+  type response = [ `Expired | `Domain_key of domain_key | `DNS_error of string ]
+
+  val domain_key :
+    signed t -> ([ `raw ] Domain_name.t, [> `Msg of string ]) result
+
+  val response : decoder -> dkim:signed t -> response:response -> decoder
+  val decoder : unit -> decoder
+  val src : decoder -> string -> int -> int -> decoder
+
+  type ('k, 'ctx) impl =
+    (module Digestif.S with type t = 'k and type ctx = 'ctx)
+
+  type result =
+    | Signature : {
+        dkim : signed t;
+        domain_key : domain_key;
+        fields : bool;
+        body : 'k;
+        hash : ('k, _) impl;
+      }
+        -> result
+
+  type decode =
+    [ `Await of decoder
+    | `Query of decoder * signed t
+    | `Signatures of result list
+    | `Malformed of string ]
+
+  val decode : decoder -> decode
 end
 
-val sign :
-  key:Mirage_crypto_pk.Rsa.priv ->
-  ?newline:newline ->
-  'flow ->
-  't Sigs.state ->
-  both:'t Sigs.both ->
-  (module Sigs.FLOW with type flow = 'flow and type backend = 't) ->
-  (module Sigs.STREAM with type backend = 't) ->
-  unsigned dkim ->
-  (signed dkim, 't) Sigs.io
-(** [sign ~key ~newline flow state (module Flow) dkim] returns a signed {!dkim}
-    value which can be serialized into the given email (represented by [flow]).
-    According to [dkim], it will sign some fields and the body.
+module Encoder : sig
+  val dkim_signature : signed t Prettym.t
+  val as_field : signed t Prettym.t
+end
 
-    The returned signed {!dkim} can be serialized with:
+module Sign : sig
+  type signer
 
-    {[
-      let dkim_field = Prettym.to_string Dkim.Encoder.as_field dkim
-    ]} *)
+  type action =
+    [ `Await of signer | `Malformed of string | `Signature of signed t ]
 
-val server_of_dkim : key:Mirage_crypto_pk.Rsa.priv -> 'a dkim -> server
-(** [server_of_dkim] returns the required server value from a {!dkim} value. The
-    user is able to store the associated server value into the DNS TXT record
-    with {!server_to_string} such as:
-
-    {[
-      let str = Dkim.server_to_string (Dkim.server_of_dkim ~key dkim) in
-      nsupdate (Dkim.domain_name dkim) `TXT str
-    ]} *)
-
-val server_to_string : server -> string
-(** [server_to_string server] generates a [string] from the given [server] value
-    to be able to store the string into the DNS TXT record. *)
-
-(** / *)
-
-val remove_signature_of_raw_dkim : Unstrctrd.t -> Unstrctrd.t
-
-val relaxed_field_canonicalization :
-  Mrmime.Field_name.t -> Unstrctrd.t -> (string -> unit) -> unit
+  val fill : signer -> string -> int -> int -> signer
+  val sign : signer -> action
+  val signer : key:key -> unsigned t -> signer
+end
 
 module Body = Body
 
+(**/*)
+
+type map
+
+val remove_signature_of_dkim : Unstrctrd.t -> Unstrctrd.t
 val parse_dkim_field_value : Unstrctrd.t -> (map, [> `Msg of string ]) result
-val field_dkim_signature : Mrmime.Field_name.t

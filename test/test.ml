@@ -1,6 +1,4 @@
-let () = Mirage_crypto_rng_unix.initialize (module Mirage_crypto_rng.Fortuna)
-let ( <.> ) f g x = f (g x)
-let error_msgf fmt = Format.kasprintf (fun msg -> Error (`Msg msg)) fmt
+let () = Mirage_crypto_rng_unix.use_default ()
 
 let reporter ppf =
   let report src level ~over k msgf =
@@ -57,207 +55,138 @@ let mails =
     (1, "raw/004.mail");
   ]
 
-module Unix_scheduler = Dkim.Sigs.Make (struct
-  type +'a t = 'a
-end)
+let expire dkim =
+  match Dkim.expire dkim with
+  | None -> false
+  | Some ts -> Int64.of_float (Unix.gettimeofday ()) > ts
 
-module Caml_flow = struct
-  type backend = Unix_scheduler.t
-  type flow = in_channel
+let gettxtrrecord extra domain_name =
+  match Domain_name.to_strings domain_name with
+  | [ "smtpapi"; "_domainkey"; "sendgrid"; "info" ] ->
+      Ok [ smtpapi__domainkey_sendgrid_info ]
+  | [ "s20150108"; "_domainkey"; "github"; "com" ] ->
+      Ok [ s20150108__domainkey_github_com ]
+  | [ "pf2014"; "_domainkey"; "github"; "com" ] ->
+      Ok [ pf2014__domainkey_github_com ]
+  | [ "google"; "_domainkey"; "janestreet"; "com" ] ->
+      Ok [ google__domainkey_janestreet_com ]
+  | [ "sjc2"; "_domainkey"; "discoursemail"; "com" ] ->
+      Ok sjc2__domainkey_discoursemail_com
+  | _ ->
+  match List.assoc_opt domain_name extra with
+  | Some domain_key -> Ok domain_key
+  | None -> Error (`Not_found domain_name)
 
-  let input flow buf off len =
-    Unix_scheduler.inj (Stdlib.input flow buf off len)
-end
-
-module Fake_resolver = struct
-  type t = ([ `raw ] Domain_name.t * Dkim.server) option
-  type backend = Unix_scheduler.t
-  type error = [ `Not_found ]
-
-  let gettxtrrecord extra domain_name =
-    let () =
-      match extra with
-      | Some (v, _) ->
-          Fmt.epr ">>> %a and %a.\n%!" Domain_name.pp v Domain_name.pp
-            domain_name
-      | _ -> () in
-    match (Domain_name.to_strings domain_name, extra) with
-    | [ "smtpapi"; "_domainkey"; "sendgrid"; "info" ], _ ->
-        Unix_scheduler.inj (Ok [ smtpapi__domainkey_sendgrid_info ])
-    | [ "s20150108"; "_domainkey"; "github"; "com" ], _ ->
-        Unix_scheduler.inj (Ok [ s20150108__domainkey_github_com ])
-    | [ "pf2014"; "_domainkey"; "github"; "com" ], _ ->
-        Unix_scheduler.inj (Ok [ pf2014__domainkey_github_com ])
-    | [ "google"; "_domainkey"; "janestreet"; "com" ], _ ->
-        Unix_scheduler.inj (Ok [ google__domainkey_janestreet_com ])
-    | [ "sjc2"; "_domainkey"; "discoursemail"; "com" ], _ ->
-        Unix_scheduler.inj (Ok sjc2__domainkey_discoursemail_com)
-    | _, Some (domain_name', extra)
-      when Domain_name.equal domain_name domain_name' ->
-        let str = Dkim.server_to_string extra in
-        Fmt.epr ">>> %S.\n%!" str ;
-        Unix_scheduler.inj (Ok [ str ])
-    | _ ->
-        Unix_scheduler.inj
-          (error_msgf "domain %a does not exists"
-             Fmt.(Dump.list string)
-             (Domain_name.to_strings domain_name))
-end
-
-let unix =
-  {
-    Dkim.Sigs.bind = (fun x f -> f (Unix_scheduler.prj x));
-    return = Unix_scheduler.inj;
-  }
-
-let unzip l =
-  let rec go (ra, rb) = function
-    | [] -> (List.rev ra, List.rev rb)
-    | (a, b) :: r -> go (a :: ra, b :: rb) r in
-  go ([], []) l
-
-let epoch = Int64.of_float <.> Unix.gettimeofday
-
-let stream_of_queue q () =
-  match Queue.pop q with
-  | v -> Unix_scheduler.inj (Some v)
-  | exception _ -> Unix_scheduler.inj None
+let response_of_dns_request errored ~dkim dns =
+  match Dkim.Verify.domain_key dkim with
+  | Error (`Msg _msg) ->
+      errored := `Invalid_domain_name dkim :: !errored ;
+      `DNS_error "Invalid domain-name to retrive domain key"
+  | Ok domain_name -> begin
+      match gettxtrrecord dns domain_name with
+      | Ok txts ->
+          let txts = String.concat "" txts in
+          begin
+            match Dkim.domain_key_of_string txts with
+            | Ok domain_key -> `Domain_key domain_key
+            | Error (`Msg _msg) ->
+                errored := `Invalid_domain_key txts :: !errored ;
+                `DNS_error "Invalid domain key"
+          end
+      | Error err ->
+          errored := err :: !errored ;
+          `DNS_error "DNS error"
+    end
 
 let verify dns ic =
-  let errors = ref [] in
+  let errored = ref [] in
+  let expired = ref [] in
+  let buf = Bytes.create 0x7ff in
+  let rec go decoder =
+    match Dkim.Verify.decode decoder with
+    | `Malformed msg -> failwith msg
+    | `Signatures sigs -> sigs
+    | `Query (decoder, dkim) when not (expire dkim) ->
+        let response = response_of_dns_request errored ~dkim dns in
+        let decoder = Dkim.Verify.response decoder ~dkim ~response in
+        go decoder
+    | `Query (decoder, dkim) ->
+        expired := dkim :: !expired ;
+        let response = `Expired in
+        let decoder = Dkim.Verify.response decoder ~dkim ~response in
+        go decoder
+    | `Await decoder ->
+        let len = input ic buf 0 (Bytes.length buf) in
+        let str = Bytes.sub_string buf 0 len in
+        let str = String.split_on_char '\n' str in
+        let str = String.concat "\r\n" str in
+        Logs.debug (fun m -> m "+%d byte(s)" (String.length str)) ;
+        let decoder = Dkim.Verify.src decoder str 0 (String.length str) in
+        go decoder in
+  let valided = go (Dkim.Verify.decoder ()) in
+  (valided, !expired, !errored)
 
-  match Dkim.extract_dkim ic unix (module Caml_flow) |> Unix_scheduler.prj with
-  | Error _ as err -> err
-  | Ok extracted -> (
-      let dkim_fields =
-        List.fold_left
-          (fun a (field, raw, value) ->
-            match Dkim.post_process_dkim value with
-            | Ok value -> (field, raw, value) :: a
-            | Error _ ->
-                errors := `Dkim_field raw :: !errors ;
-                a)
-          [] extracted.Dkim.dkim_fields in
-      let s = Queue.create () in
-      let r = Queue.create () in
-      let (`Consume th) =
-        Dkim.extract_body ic unix
-          (module Caml_flow)
-          ~prelude:extracted.Dkim.prelude
-          ~simple:(function Some v -> Queue.push v s | None -> ())
-          ~relaxed:(function Some v -> Queue.push v r | None -> ()) in
-      let () = Unix_scheduler.prj th in
-
-      let server_keys =
-        List.map
-          (fun (_, _, value) ->
-            Unix_scheduler.prj
-              (Dkim.extract_server dns unix (module Fake_resolver) value))
-          dkim_fields in
-
-      let server_keys, dkim_fields =
-        List.fold_left2
-          (fun a server_key ((_, _, _) as dkim_field) ->
-            let ( >>= ) = Result.bind in
-            match server_key >>= Dkim.post_process_server with
-            | Ok server_key -> (server_key, dkim_field) :: a
-            | Error (`Msg err) ->
-                errors := `Server err :: !errors ;
-                a)
-          [] server_keys dkim_fields
-        |> unzip in
-
-      let ress =
-        List.map2
-          (fun (raw_field_dkim, raw_dkim, dkim) server_key ->
-            ( Dkim.domain dkim,
-              Dkim.verify unix ~epoch extracted.Dkim.fields
-                ~simple:(stream_of_queue (Queue.copy s))
-                ~relaxed:(stream_of_queue (Queue.copy r))
-                (raw_field_dkim, raw_dkim) dkim server_key
-              |> Unix_scheduler.prj ))
-          dkim_fields server_keys in
-
-      match !errors with
-      | [] -> Ok ress
-      | errors ->
-          List.iter
-            (function
-              | `Dkim_field _ -> Fmt.epr "Invalid DKIM-field.\n%!"
-              | `Server err -> Fmt.epr "%s.\n%!" err)
-            errors ;
-          Error (`Msg "Got errors while computing inputs"))
-
-let test_verify (trust, filename) =
+let test_verify (_trust, filename) =
   Alcotest.test_case filename `Quick @@ fun () ->
   let ic = open_in filename in
-  let rs = verify None ic in
-  close_in ic ;
-  match rs with
-  | Ok rs ->
-      Alcotest.(check int) "DKIM fields" (List.length rs) trust ;
-      List.iter
-        (fun (domain, res) ->
-          Alcotest.(check bool) (Domain_name.to_string domain) res true)
-        rs
-  | Error (`Msg err) -> Alcotest.fail err
+  let finally () = close_in ic in
+  Fun.protect ~finally @@ fun () ->
+  let valided, expired, errored = verify [] ic in
+  Alcotest.(check int) "errored" (List.length errored) 0 ;
+  Fmt.pr "%d valid dkim signature(s)\n%!" (List.length valided) ;
+  Fmt.pr "%d expired dkim signature(s)\n%!" (List.length expired)
 
-module Caml_stream = struct
-  type 'a t = 'a Queue.t
-  type backend = Unix_scheduler.t
-
-  let create () =
-    let q = Queue.create () in
-    let push = function Some v -> Queue.push v q | None -> () in
-    (q, push)
-
-  let get q =
-    match Queue.pop q with
-    | v -> Unix_scheduler.inj (Some v)
-    | exception _ -> Unix_scheduler.inj None
-end
-
-let both =
-  let open Unix_scheduler in
-  { Dkim.Sigs.f = (fun a b -> inj (prj a, prj b)) }
-
-let test_sign (trust, filename) =
-  Alcotest.test_case filename `Quick @@ fun () ->
-  let ic = open_in filename in
-  let x25519 = Domain_name.of_string_exn "x25519.net" in
-  let dkim = Dkim.v ~selector:(Domain_name.of_string_exn "admin") x25519 in
-  let dkim =
-    Unix_scheduler.prj
-      (Dkim.sign ~key:priv_of_seed ic unix ~both
-         (module Caml_flow)
-         (module Caml_stream)
-         dkim) in
-  let oc = open_out (filename ^ ".signed") in
-  seek_in ic 0 ;
-  output_string oc (Prettym.to_string ~new_line:"\n" Dkim.Encoder.as_field dkim) ;
-  let tmp = Bytes.create 0x1000 in
+let copy oc ic =
+  let buf = Bytes.create 0x7ff in
   let rec go () =
-    let len = input ic tmp 0 (Bytes.length tmp) in
-    if len = 0
-    then ()
-    else (
-      output_string oc (Bytes.sub_string tmp 0 len) ;
-      go ()) in
-  go () ;
-  close_in ic ;
+    let len = input ic buf 0 (Bytes.length buf) in
+    if len > 0
+    then begin
+      output_string oc (Bytes.sub_string buf 0 len) ;
+      go ()
+    end in
+  go ()
+
+let test_sign (_trust, filename) =
+  Alcotest.test_case filename `Quick @@ fun () ->
+  let ic = open_in filename in
+  let finally () = close_in ic in
+  Fun.protect ~finally @@ fun () ->
+  let buf = Bytes.create 0x7ff in
+  let x25519 = Domain_name.of_string_exn "x25519.net" in
+  let selector = Domain_name.of_string_exn "admin" in
+  let dkim = Dkim.v ~selector x25519 in
+  let rec go signer =
+    match Dkim.Sign.sign signer with
+    | `Malformed err -> failwith err
+    | `Signature dkim -> dkim
+    | `Await signer ->
+        let len = input ic buf 0 (Bytes.length buf) in
+        let str = Bytes.sub_string buf 0 len in
+        let str = String.split_on_char '\n' str in
+        let str = String.concat "\r\n" str in
+        let signer = Dkim.Sign.fill signer str 0 (String.length str) in
+        go signer in
+  let key = `Rsa priv_of_seed in
+  let dkim = go (Dkim.Sign.signer ~key dkim) in
+  Logs.debug (fun m -> m "email signed!") ;
+  let oc = open_out (filename ^ ".signed") in
+  output_string oc (Prettym.to_string ~new_line:"\n" Dkim.Encoder.as_field dkim) ;
+  seek_in ic 0 ;
+  copy oc ic ;
   close_out oc ;
-  let ic = open_in (filename ^ ".signed") in
-  let server = Dkim.server_of_dkim ~key:priv_of_seed dkim in
+  let domain_key = Dkim.domain_key_of_dkim ~key dkim in
+  let domain_key = [ Dkim.domain_key_to_string domain_key ] in
   let domain_name = Result.get_ok (Dkim.domain_name dkim) in
-  let rs = verify (Some (domain_name, server)) ic in
-  match rs with
-  | Ok rs ->
-      Alcotest.(check int) "DKIM fields" (List.length rs) (succ trust) ;
-      List.iter
-        (fun (domain, res) ->
-          Alcotest.(check bool) (Domain_name.to_string domain) res true)
-        rs
-  | Error (`Msg err) -> Alcotest.fail err
+  let ic = open_in (filename ^ ".signed") in
+  let finally () = close_in ic in
+  Fun.protect ~finally @@ fun () ->
+  Logs.debug (fun m -> m "verify signed email.") ;
+  let valided, expired, errored = verify [ (domain_name, domain_key) ] ic in
+  Alcotest.(check bool) "valided" (List.length valided >= 1) true ;
+  Alcotest.(check int) "errored" (List.length errored) 0 ;
+  Fmt.pr "%d valid dkim signature(s)\n%!" (List.length valided) ;
+  Fmt.pr "%d expired dkim signature(s)\n%!" (List.length expired)
 
 let () =
   Alcotest.run "ocaml-dkim"

@@ -1,25 +1,14 @@
-type 'a stream = unit -> 'a option Lwt.t
-
 module Make (P : Mirage_clock.PCLOCK) (D : Dns_client_mirage.S) : sig
-  type nameserver =
-    [ `Plaintext of Ipaddr.t * int | `Tls of Tls.Config.client * Ipaddr.t * int ]
-
-  val server :
-    D.t -> 'a Dkim.dkim -> (Dkim.server, [> `Msg of string ]) result Lwt.t
-
   val verify :
-    ?newline:Dkim.newline ->
-    (string * int * int) stream ->
+    ?newline:[ `LF | `CRLF ] ->
     D.t ->
-    ( Dkim.signed Dkim.dkim list * Dkim.signed Dkim.dkim list,
-      [> `Msg of string ] )
-    result
-    Lwt.t
-end
+    string Lwt_stream.t ->
+    (Dkim.Verify.result list, [> `Msg of string ]) result Lwt.t
 
-val sign :
-  key:Mirage_crypto_pk.Rsa.priv ->
-  ?newline:Dkim.newline ->
-  (string * int * int) stream ->
-  Dkim.unsigned Dkim.dkim ->
-  (Dkim.signed Dkim.dkim * (string * int * int) stream) Lwt.t
+  val sign :
+    ?newline:[ `LF | `CRLF ] ->
+    key:Dkim.key ->
+    Dkim.unsigned Dkim.t ->
+    string Lwt_stream.t ->
+    (Dkim.signed Dkim.t, [> `Msg of string ]) result Lwt.t
+end

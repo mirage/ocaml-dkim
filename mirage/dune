@@ -1,4 +1,4 @@
 (library
  (name dkim_mirage)
  (public_name dkim-mirage)
- (libraries dkim mirage-time mirage-clock tcpip dns-client-mirage lwt))
+ (libraries dkim mirage-clock dns-client-mirage lwt))

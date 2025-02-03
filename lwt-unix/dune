@@ -1,0 +1,4 @@
+(library
+ (name dkim_lwt_unix)
+ (public_name dkim-lwt-unix)
+ (libraries dkim dns-client-lwt lwt lwt.unix))
