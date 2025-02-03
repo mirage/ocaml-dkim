@@ -36,6 +36,6 @@ depends: [
   "mirage-crypto"     {>= "1.0.0"}
   "mirage-crypto-pk"  {>= "1.0.0"}
   "x509"              {>= "1.0.0"}
-  "mirage-crypto-rng" {with-test & >= "1.0.0"}
+  "mirage-crypto-rng" {with-test & >= "1.2.0"}
   "alcotest"          {with-test}
 ]
