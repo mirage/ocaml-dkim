@@ -958,7 +958,8 @@ module Sign = struct
                 let ctx = canon field_name unstrctrd feed_string ctx in
                 (ctx, remove_assoc field_name fields)
             | None -> (ctx, fields) in
-          let ctx, _ = List.fold_left fn (Hash.empty, fields) t.dkim.h in
+          let ctx, _ =
+            List.fold_left fn (Hash.empty, List.rev fields) t.dkim.h in
           let fields = Digest { k; m = (module Hash); ctx } in
           let body = Digest { k; m = (module Hash); ctx = Hash.empty } in
           let decoder = Body.decoder () in
