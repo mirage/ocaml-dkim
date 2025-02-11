@@ -42,10 +42,9 @@ let run _quiet src newline nameservers =
   | Error (`Msg msg) -> failwith msg
   | Ok sigs ->
       let fn
-          (Dkim.Verify.Signature
-             { dkim; domain_key = _; fields; body; hash = (module Hash) } as
+          (Dkim.Verify.Signature { dkim; domain_key = _; fields; body } as
            result) =
-        let body = Eqaf.equal (Dkim.body dkim) (Hash.to_raw_string body) in
+        let body = Eqaf.equal (Dkim.body dkim) body in
         if body && fields then Either.Left result else Either.Right result in
       let valid, invalid = List.partition_map fn sigs in
       show_result ~valid ~invalid ;

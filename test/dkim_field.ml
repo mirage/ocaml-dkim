@@ -35,7 +35,7 @@ let test_8 =
   in
   let field_value = Unstrctrd.of_string (field_value ^ "\r\n") in
   let _, field_value = Result.get_ok field_value in
-  match Dkim.parse_dkim_field_value field_value with
+  match Dkim.of_unstrctrd field_value with
   | Ok _ -> ()
   | Error (`Msg err) -> Alcotest.fail err
 
