@@ -2,6 +2,7 @@ let src = Logs.Src.create "dkim"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 module Body = Body
+module Decoder = Decoder
 
 type hash_algorithm = Hash_algorithm : 'k Digestif.hash -> hash_algorithm
 type hash_value = Hash_value : 'k Digestif.hash * 'k Digestif.t -> hash_value
