@@ -131,6 +131,7 @@ module Sign : sig
 end
 
 module Body = Body
+module Decoder = Decoder
 
 (**/*)
 
