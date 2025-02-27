@@ -2,7 +2,7 @@ open Lwt.Infix
 
 let ( % ) f g = fun x -> f (g x)
 
-module Make (P : Mirage_clock.PCLOCK) (D : Dns_client_mirage.S) = struct
+module Make (D : Dns_client_mirage.S) = struct
   let response_of_dns_request ~dkim dns =
     match Dkim.Verify.domain_key dkim with
     | Error (`Msg msg) -> Lwt.return (`DNS_error msg)
@@ -22,7 +22,8 @@ module Make (P : Mirage_clock.PCLOCK) (D : Dns_client_mirage.S) = struct
         | Error (`Msg msg) -> `DNS_error msg)
 
   let now () =
-    let d, _ps = P.now_d_ps () in
+    let now = Mirage_ptime.now () in
+    let d, _ = Ptime.Span.to_d_ps (Ptime.to_span now) in
     Int64.of_int d
 
   let expire dkim =

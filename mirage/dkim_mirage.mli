@@ -1,4 +1,4 @@
-module Make (P : Mirage_clock.PCLOCK) (D : Dns_client_mirage.S) : sig
+module Make (D : Dns_client_mirage.S) : sig
   val verify :
     ?newline:[ `LF | `CRLF ] ->
     D.t ->
