@@ -24,3 +24,4 @@ depends: [
   "lwt"
   "dns-client-lwt"
 ]
+x-maintenance-intent: [ "(latest)" ]
