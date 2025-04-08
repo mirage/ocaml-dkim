@@ -41,6 +41,13 @@ let sjc2__domainkey_discoursemail_com =
     "B+rSYQ3mx9vAd8JlXdD7sIFaWK4Sz3YPad6M4d1p+FWrZ94D0Z6RFPzl/Q+AN5QnVAyjCjVqaQ+QQoUW3TYFc7uaKwbDaATpPOadz7lXNqr9C+i4DNWSU+Lff48e9WQ6tt+MZTJWeaZtL8g9OfBdwIDAQAB";
   ]
 
+let selector1__domainkey_arm_com =
+  [
+    "v=DKIM1; k=rsa; \
+     p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCxOd2LnopxcFzP7bDnyOvcA8X3CtmBkjG8Mtban/NIWzQh73PZMz4usZ3QNVWoVtomGPk8FBMhYTwIGao5WVFGjDaAr0+6QfeLSHtPGzkgm2Tqy7fb9sdCwxHPZSXF+s/7fyElWPaa8roYR2OgdGZw3vnzE++7jbc0Yf+md/2HuwIDAQAB; \
+     n=1024,1450051522,1465862722";
+  ]
+
 let seed = Base64.decode_exn "Do8KdmOYnU7yzqDn3A3lJwwXPaa1NRdv6E9R2KgZyXg="
 
 let priv_of_seed =
@@ -53,6 +60,7 @@ let mails =
     (1, "raw/002.mail");
     (1, "raw/003.mail");
     (1, "raw/004.mail");
+    (2, "raw/005.mail");
   ]
 
 let expire dkim =
@@ -72,6 +80,8 @@ let gettxtrrecord extra domain_name =
       Ok [ google__domainkey_janestreet_com ]
   | [ "sjc2"; "_domainkey"; "discoursemail"; "com" ] ->
       Ok sjc2__domainkey_discoursemail_com
+  | [ "selector1"; "_domainkey"; "arm"; "com" ] ->
+      Ok selector1__domainkey_arm_com
   | _ ->
   match List.assoc_opt domain_name extra with
   | Some domain_key -> Ok domain_key

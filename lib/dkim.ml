@@ -37,8 +37,14 @@ let of_unstrctrd unstrctrd =
   let str = Unstrctrd.(to_utf_8_string (trim unstrctrd)) in
   match Angstrom.parse_string ~consume:All Decoder.mail_tag_list str with
   | Ok v -> Ok v
-  | Error _err -> error_msgf "Invalid DKIM Signature: %S" str
-  | exception _ -> error_msgf "Invalid DKIM Signature: %S" str
+  | Error err ->
+      Log.err (fun m -> m "Got an error while parsing DKIM-Signature: %s" err) ;
+      error_msgf "Invalid DKIM Signature: %S" str
+  | exception exn ->
+      Log.err (fun m ->
+          m "Unexpected exception while parsing DKIM-Signature: %s"
+            (Printexc.to_string exn)) ;
+      error_msgf "Invalid DKIM Signature: %S" str
 
 let field_dkim_signature = Mrmime.Field_name.v "DKIM-Signature"
 
@@ -210,9 +216,10 @@ let string_of_quoted_printable x =
 
 let post_process_dkim hmap =
   let v =
-    match Map.find Map.K.v hmap with
-    | Some v -> v
-    | None -> Fmt.failwith "Version is required" in
+    match Map.find Map.K.v hmap with Some v -> v | None -> 1
+    (* XXX(dinosaure): because ARC-{Seal,Message-Signature} does not specify it.
+                   But DKIM should fail, the version is required. *)
+  in
   let a =
     match Map.find Map.K.a hmap with
     | Some (alg, x) -> (alg, hash x)
@@ -225,7 +232,10 @@ let post_process_dkim hmap =
   let bh =
     match Option.map (Base64.decode ~pad:false) (Map.find Map.K.bh hmap) with
     | Some (Error (`Msg err)) -> failwith err
-    | None -> Fmt.failwith "Hash of canonicalized body part is required"
+    | None ->
+        let _, Hash_algorithm k = a in
+        Hash_value (k, Digestif.digest_string k "")
+        (* Fmt.failwith "Hash of canonicalized body part is required" *)
     | Some (Ok v) -> begin
         let _, Hash_algorithm k = a in
         match Digestif.of_raw_string_opt k v with
@@ -240,10 +250,8 @@ let post_process_dkim hmap =
     match Map.find Map.K.d hmap with
     | Some v -> failwith_error_msg (Domain_name.of_string (String.concat "." v))
     | None -> Fmt.failwith "SDID is required" in
-  let h =
-    match Map.find Map.K.h hmap with
-    | Some v -> v
-    | None -> Fmt.failwith "Signed header fields required" in
+  let h = match Map.find Map.K.h hmap with Some v -> v | None -> [] in
+  (* TODO: explain even if, from DKIM perspective, it's required *)
   let i = Map.find Map.K.i hmap in
   let l = Map.find Map.K.l hmap in
   let q =
@@ -279,6 +287,10 @@ let canonicalization ({ c; _ } : _ t) =
     | Value.Canonicalization_ext str ->
         Fmt.failwith "Invalid canonicalization: %s" str in
   (to_c (fst c), to_c (snd c))
+
+let with_canonicalization t (a, b) =
+  let of_c = function `Relaxed -> Value.Relaxed | `Simple -> Value.Simple in
+  { t with c = (of_c a, of_c b) }
 
 let body : signed t -> string =
  fun { bbh = _, Hash_value (m, hash); _ } -> Digestif.to_raw_string m hash
@@ -523,7 +535,7 @@ module Verify = struct
   and state =
     | Extraction of Mrmime.Hd.decoder * fields * maps
     | Queries of raw * dkim list
-    | Body of Body.decoder * ctx list
+    | Body of Body.decoder * [ `CRLF | `Spaces of string ] list * ctx list
 
   and raw = {
     dkims : (Mrmime.Field_name.t * Unstrctrd.t * Map.t) list;
@@ -568,7 +580,7 @@ module Verify = struct
     | Extraction (v, _, _) ->
         Mrmime.Hd.src v src idx len ;
         if len == 0 then end_of_input decoder else decoder
-    | Body (v, _) ->
+    | Body (v, _, _) ->
         Body.src v input idx len ;
         if len == 0 then end_of_input decoder else decoder
     | Queries _ -> if len == 0 then end_of_input decoder else decoder
@@ -656,7 +668,7 @@ module Verify = struct
         let decoder = Body.decoder () in
         if Bytes.length prelude > 0
         then Body.src decoder prelude 0 (Bytes.length prelude) ;
-        let state = Body (decoder, ctxs) in
+        let state = Body (decoder, [], ctxs) in
         decode { t with state }
     | (_, _, map) :: _ ->
     try
@@ -665,7 +677,7 @@ module Verify = struct
       `Query (t, dkim)
     with _ -> `Malformed "Invalid DKIM-Signature"
 
-  and digest t decoder ctxs =
+  and digest t decoder stack ctxs =
     let rec go stack results =
       match Body.decode decoder with
       | (`Spaces _ | `CRLF) as x -> go (x :: stack) results
@@ -678,23 +690,23 @@ module Verify = struct
           let results = List.map fn results in
           go [] results
       | `Await ->
-          let fn (Ctx (fields, value)) =
-            Ctx (fields, Digest.digest_wsp stack value) in
-          let results = List.map fn results in
-          let state = Body (decoder, results) in
+          let state = Body (decoder, stack, results) in
           let rem = src_rem t in
           let input_pos = t.input_pos + rem in
           `Await { t with state; input_pos }
       | `End ->
-          let signatures = signatures ctxs in
+          let fn (Ctx (fields, value)) =
+            Ctx (fields, Digest.digest_wsp [ `CRLF ] value) in
+          let results = List.map fn results in
+          let signatures = signatures results in
           `Signatures signatures in
-    go [] ctxs
+    go stack ctxs
 
   and decode t =
     match t.state with
     | Extraction (decoder, fields, dkims) -> extract t decoder fields dkims
     | Queries (raw, dkims) -> queries t raw dkims
-    | Body (decoder, dkims) -> digest t decoder dkims
+    | Body (decoder, stack, dkims) -> digest t decoder stack dkims
 end
 
 module Encoder = struct
@@ -872,6 +884,7 @@ module Sign = struct
     | Sign : {
         decoder : Body.decoder;
         fields : 'k digest;
+        stack : [ `CRLF | `Spaces of string ] list;
         body : 'k digest;
       }
         -> state
@@ -967,7 +980,7 @@ module Sign = struct
           let prelude = Bytes.unsafe_of_string prelude in
           if Bytes.length prelude > 0
           then Body.src decoder prelude 0 (Bytes.length prelude) ;
-          let state = Sign { decoder; fields; body } in
+          let state = Sign { decoder; fields; stack = []; body } in
           sign { t with state }
       | `Await ->
           let state = Fields (decoder, fields) in
@@ -977,9 +990,14 @@ module Sign = struct
           `Await t in
     go fields
 
-  and digest : type k. signer -> Body.decoder -> k digest -> k digest -> action
-      =
-   fun t decoder fields body ->
+  and digest : type k.
+      signer ->
+      Body.decoder ->
+      k digest ->
+      [ `CRLF | `Spaces of string ] list ->
+      k digest ->
+      action =
+   fun t decoder fields stack body ->
     let rec go stack body =
       match Body.decode decoder with
       | (`Spaces _ | `CRLF) as x -> go (x :: stack) body
@@ -988,12 +1006,13 @@ module Sign = struct
           let body = digest_str x body in
           go [] body
       | `Await ->
-          let body = digest_wsp ~dkim:t.dkim stack body in
-          let state = Sign { decoder; fields; body } in
+          (* let body = digest_wsp ~dkim:t.dkim stack body in *)
+          let state = Sign { decoder; fields; stack; body } in
           let rem = src_rem t in
           let input_pos = t.input_pos + rem in
           `Await { t with state; input_pos }
       | `End ->
+          let body = digest_wsp ~dkim:t.dkim [ `CRLF ] body in
           let (Digest { k; m = (module Hash); ctx }) = body in
           let bh =
             Hash_value
@@ -1018,12 +1037,13 @@ module Sign = struct
                 let msg = Hash.(to_raw_string (get ctx)) in
                 Mirage_crypto_ec.Ed25519.sign ~key msg in
           `Signature { t.dkim with bbh = (b, bh) } in
-    go [] body
+    go stack body
 
   and sign t =
     match t.state with
     | Fields (decoder, fs) -> fields t decoder fs
-    | Sign { decoder; fields; body } -> digest t decoder fields body
+    | Sign { decoder; fields; stack; body } ->
+        digest t decoder fields stack body
 
   let signer ~key dkim =
     let () =
@@ -1082,6 +1102,25 @@ let equal_domain_key (a : domain_key) (b : domain_key) =
     && List.for_all2 ( = ) (sort_service a.s) (sort_service b.s)
     && List.for_all2 ( = ) (sort_name a.t) (sort_name b.t)
   with _ -> false
+
+let get_key name hmap =
+  let exception Found of string in
+  let fn (Map.B (key, value)) =
+    match Map.Key.info key with
+    | { Map.name = name'; ty = Map.Unknown; _ } ->
+        if name = name' then raise_notrace (Found value)
+    | _ -> () in
+  match Map.iter fn hmap with exception Found value -> Some value | () -> None
+
+let of_unstrctrd_to_map unstrctrd = of_unstrctrd unstrctrd
+
+let map_to_t map =
+  try Ok (post_process_dkim map)
+  with exn ->
+    Log.err (fun m ->
+        m "Unexpected exception while normalizing DKIM-Signature: %s"
+          (Printexc.to_string exn)) ;
+    error_msgf "Invalid DKIM-Signature"
 
 let of_unstrctrd unstrctrd =
   match of_unstrctrd unstrctrd with

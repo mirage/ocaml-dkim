@@ -40,6 +40,7 @@ val signature_and_hash : signed t -> string * hash_value
 val algorithm : 'a t -> algorithm
 val of_string : string -> (signed t, [> `Msg of string ]) result
 val of_unstrctrd : Unstrctrd.t -> (signed t, [> `Msg of string ]) result
+val with_canonicalization : 'a t -> canonicalization * canonicalization -> 'a t
 
 type domain_key
 
@@ -141,3 +142,6 @@ val field_dkim_signature : Mrmime.Field_name.t
 val remove_signature_of_dkim : Unstrctrd.t -> Unstrctrd.t
 val uniq : Unstrctrd.t -> Unstrctrd.t
 val trim : Unstrctrd.t -> Unstrctrd.t
+val of_unstrctrd_to_map : Unstrctrd.t -> (map, [> `Msg of string ]) result
+val map_to_t : map -> (signed t, [> `Msg of string ]) result
+val get_key : string -> map -> string option
