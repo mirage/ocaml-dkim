@@ -1,7 +1,8 @@
-type 'a tag = { name : string; pp : 'a Fmt.t }
+type 'a ty = Unknown : string ty | Any : 'a ty
+type 'a tag = { name : string; pp : 'a Fmt.t; ty : 'a ty }
 
 module Info = struct
-  type 'a t = 'a tag = { name : string; pp : 'a Fmt.t }
+  type 'a t = 'a tag = { name : string; pp : 'a Fmt.t; ty : 'a ty }
 end
 
 include Hmap.Make (Info)
@@ -9,63 +10,100 @@ include Hmap.Make (Info)
 module K = struct
   open Value
 
-  let v : version key = Key.create { name = "version"; pp = Fmt.int }
+  let v : version key =
+    let name = "version" and pp = Fmt.int and ty = Any in
+    Key.create { name; pp; ty }
 
   let a : (algorithm * hash) key =
-    Key.create
-      {
-        name = "algorithm";
-        pp = Fmt.Dump.pair Value.pp_algorithm Value.pp_hash;
-      }
+    let name = "algorithm"
+    and pp = Fmt.(Dump.pair Value.pp_algorithm Value.pp_hash)
+    and ty = Any in
+    Key.create { name; pp; ty }
 
-  let b : base64 key = Key.create { name = "signature"; pp = Fmt.string }
-  let bh : base64 key = Key.create { name = "hash"; pp = Fmt.string }
+  let b : base64 key =
+    let name = "signature" and pp = Fmt.string and ty = Any in
+    Key.create { name; pp; ty }
+
+  let bh : base64 key =
+    let name = "hash" and pp = Fmt.string and ty = Any in
+    Key.create { name; pp; ty }
 
   let c : (canonicalization * canonicalization) key =
-    Key.create
-      {
-        name = "canonicalization";
-        pp = Fmt.Dump.pair Value.pp_canonicalization Value.pp_canonicalization;
-      }
+    let name = "canonicalization"
+    and pp = Fmt.(Dump.pair Value.pp_canonicalization Value.pp_canonicalization)
+    and ty = Any in
+    Key.create { name; pp; ty }
 
   let d : domain_name key =
-    Key.create { name = "domain"; pp = Value.pp_domain_name }
+    let name = "domain" and pp = Value.pp_domain_name and ty = Any in
+    Key.create { name; pp; ty }
 
   let h : Mrmime.Field_name.t list key =
-    Key.create { name = "field"; pp = Fmt.Dump.list Mrmime.Field_name.pp }
+    let name = "field"
+    and pp = Fmt.(Dump.list Mrmime.Field_name.pp)
+    and ty = Any in
+    Key.create { name; pp; ty }
 
-  let i : auid key = Key.create { name = "auid"; pp = Value.pp_auid }
-  let l : int key = Key.create { name = "length"; pp = Fmt.int }
+  let i : auid key =
+    let name = "auid" and pp = Value.pp_auid and ty = Any in
+    Key.create { name; pp; ty }
+
+  let l : int key =
+    let name = "length" and pp = Fmt.int and ty = Any in
+    Key.create { name; pp; ty }
 
   let q : query list key =
-    Key.create { name = "query"; pp = Fmt.Dump.list Value.pp_query }
+    let name = "query" and pp = Fmt.(Dump.list Value.pp_query) and ty = Any in
+    Key.create { name; pp; ty }
 
   let s : selector key =
-    Key.create { name = "selector"; pp = Value.pp_selector }
+    let name = "selector" and pp = Value.pp_selector and ty = Any in
+    Key.create { name; pp; ty }
 
-  let t : int64 key = Key.create { name = "timestamp"; pp = Fmt.int64 }
-  let x : int64 key = Key.create { name = "expiration"; pp = Fmt.int64 }
+  let t : int64 key =
+    let name = "timestamp" and pp = Fmt.int64 and ty = Any in
+    Key.create { name; pp; ty }
+
+  let x : int64 key =
+    let name = "expiration" and pp = Fmt.int64 and ty = Any in
+    Key.create { name; pp; ty }
 
   let z : copies key =
-    Key.create { name = "copies"; pp = Fmt.Dump.list Value.pp_copy }
+    let name = "copies" and pp = Fmt.(Dump.list Value.pp_copy) and ty = Any in
+    Key.create { name; pp; ty }
 
   let sv : server_version key =
-    Key.create { name = "server-version"; pp = Fmt.string }
+    let name = "server-version" and pp = Fmt.string and ty = Any in
+    Key.create { name; pp; ty }
 
   let sh : hash list key =
-    Key.create { name = "hashes"; pp = Fmt.Dump.list Value.pp_hash }
+    let name = "hashes" and pp = Fmt.(Dump.list Value.pp_hash) and ty = Any in
+    Key.create { name; pp; ty }
 
   let k : algorithm key =
-    Key.create { name = "algorithm"; pp = Value.pp_algorithm }
+    let name = "algorithm" and pp = Value.pp_algorithm and ty = Any in
+    Key.create { name; pp; ty }
 
-  let p : base64 key = Key.create { name = "public-key"; pp = Fmt.string }
-  let n : string key = Key.create { name = "notes"; pp = Fmt.string }
+  let p : base64 key =
+    let name = "public-key" and pp = Fmt.string and ty = Any in
+    Key.create { name; pp; ty }
+
+  let n : string key =
+    let name = "notes" and pp = Fmt.string and ty = Any in
+    Key.create { name; pp; ty }
 
   let ss : service list key =
-    Key.create { name = "services"; pp = Fmt.Dump.list Value.pp_service }
+    let name = "services"
+    and pp = Fmt.(Dump.list Value.pp_service)
+    and ty = Any in
+    Key.create { name; pp; ty }
 
   let st : name list key =
-    Key.create { name = "names"; pp = Fmt.Dump.list Value.pp_name }
+    let name = "names" and pp = Fmt.(Dump.list Value.pp_name) and ty = Any in
+    Key.create { name; pp; ty }
 
-  let unknown : string key = Key.create { name = "unknown"; pp = Fmt.string }
+  let unknown : string -> string key =
+   fun name ->
+    let pp = Fmt.string and ty = Unknown in
+    Key.create { name; pp; ty }
 end

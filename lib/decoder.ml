@@ -362,7 +362,7 @@ let z =
   tag_spec ~tag_name ~tag_value >>| binding
 
 let unknown =
-  let tag_name = take_while1 is_alpha >>| fun _ -> Map.K.unknown in
+  let tag_name = take_while1 is_alpha >>| Map.K.unknown in
   tag_spec ~tag_name ~tag_value >>| binding
 
 let mail_tag_list =
@@ -374,7 +374,7 @@ let mail_tag_list =
     <|> c
     <|> d
     <|> h
-    <|> i
+    (* <|> i *)
     <|> l
     <|> q
     <|> s
