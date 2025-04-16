@@ -292,6 +292,8 @@ let with_canonicalization t (a, b) =
   let of_c = function `Relaxed -> Value.Relaxed | `Simple -> Value.Simple in
   { t with c = (of_c a, of_c b) }
 
+let with_signature_and_hash t bbh = { t with bbh }
+
 let body : signed t -> string =
  fun { bbh = _, Hash_value (m, hash); _ } -> Digestif.to_raw_string m hash
 
@@ -299,7 +301,7 @@ let fields ({ h; _ } : _ t) = h
 let domain { d; _ } = d
 let selector ({ s; _ } : _ t) = s
 let hash_algorithm ({ a; _ } : _ t) = snd a
-let signature_and_hash ({ bbh; _ } : signed t) = bbh
+let signature_and_hash { bbh; _ } = bbh
 
 let algorithm ({ a; _ } : _ t) =
   match fst a with
@@ -850,6 +852,11 @@ module Encoder = struct
         fws;
       ]
       dkim.v dkim.a dkim.c dkim.d dkim.s dkim.t dkim.x dkim.q dkim.l bh dkim.h b
+
+  let algorithm ppf (alg, hash) =
+    match alg with
+    | `RSA -> algorithm ppf (Value.RSA, hash)
+    | `Ed25519 -> algorithm ppf (Value.ED25519, hash)
 
   let as_field ppf dkim =
     eval ppf

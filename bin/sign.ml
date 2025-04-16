@@ -44,6 +44,8 @@ let run src dst newline private_key seed selector hash canon domain_name =
       match dkim with
       | Error (`Msg msg) -> finally () >>= fun () -> failwith msg
       | Ok dkim -> begin
+          let bbh = (Dkim.signature_and_hash dkim :> string * Dkim.hash_value) in
+          let dkim = Dkim.with_signature_and_hash dkim bbh in
           match dst with
           | `Output ->
               Fmt.pr "%s"
