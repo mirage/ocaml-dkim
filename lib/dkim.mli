@@ -73,17 +73,26 @@ module Digest : sig
 
   type 'k t = Digest : { m : ('k, 'ctx) impl; ctx : 'ctx } -> 'k t
   and ('k, 'ctx) impl = (module Digestif.S with type t = 'k and type ctx = 'ctx)
-  and 'k value = signed dkim * domain_key * 'k t
-  and pack = Value : 'k value -> pack
+  and ('signed, 'k) value = 'signed dkim * 'k t
+  and pack = Value : (signed, 'k) value -> pack
 
   val digest_fields :
     (Mrmime.Field_name.t * Unstrctrd.t) list ->
     Mrmime.Field_name.t * Unstrctrd.t * signed dkim * domain_key ->
     string * pack
 
-  val digest_wsp : [< `CRLF | `Spaces of string ] list -> 'a value -> 'a value
-  val digest_str : string -> 'a value -> 'a value
-  val verify : fields:string -> 'k value -> string * bool
+  val digest_wsp :
+    [< `CRLF | `Spaces of string ] list ->
+    ('signed, 'k) value ->
+    ('signed, 'k) value
+
+  val digest_str : string -> ('signed, 'k) value -> ('signed, 'k) value
+
+  val verify :
+    fields:string ->
+    domain_key:domain_key ->
+    (signed, 'k) value ->
+    string * bool
 end
 
 module Verify : sig
