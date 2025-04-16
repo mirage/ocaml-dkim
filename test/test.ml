@@ -181,6 +181,8 @@ let test_sign (_trust, filename) =
   let dkim = go (Dkim.Sign.signer ~key dkim) in
   Logs.debug (fun m -> m "email signed!") ;
   let oc = open_out (filename ^ ".signed") in
+  let bbh = (Dkim.signature_and_hash dkim :> string * Dkim.hash_value) in
+  let dkim = Dkim.with_signature_and_hash dkim bbh in
   output_string oc (Prettym.to_string ~new_line:"\n" Dkim.Encoder.as_field dkim) ;
   seek_in ic 0 ;
   copy oc ic ;

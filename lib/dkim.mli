@@ -1,18 +1,17 @@
-type 'a t
-and signed
-and unsigned
-
 type algorithm = [ `RSA | `Ed25519 ]
 type hash = [ `SHA1 | `SHA256 ]
 type canonicalization = [ `Simple | `Relaxed ]
 type query = [ `DNS of [ `TXT ] ]
+type hash_algorithm = Hash_algorithm : 'k Digestif.hash -> hash_algorithm
+type hash_value = Hash_value : 'k Digestif.hash * 'k Digestif.t -> hash_value
+
+type 'a t
+and signed = private string * hash_value
+and unsigned
 
 type key =
   [ `Rsa of Mirage_crypto_pk.Rsa.priv
   | `Ed25519 of Mirage_crypto_ec.Ed25519.priv ]
-
-type hash_algorithm = Hash_algorithm : 'k Digestif.hash -> hash_algorithm
-type hash_value = Hash_value : 'k Digestif.hash * 'k Digestif.t -> hash_value
 
 val v :
   ?version:int ->
@@ -36,11 +35,12 @@ val selector : 'a t -> [ `raw ] Domain_name.t
 val domain_name : 'a t -> ([ `raw ] Domain_name.t, [> `Msg of string ]) result
 val canonicalization : 'a t -> canonicalization * canonicalization
 val hash_algorithm : 'a t -> hash_algorithm
-val signature_and_hash : signed t -> string * hash_value
+val signature_and_hash : 'signed t -> 'signed
 val algorithm : 'a t -> algorithm
 val of_string : string -> (signed t, [> `Msg of string ]) result
 val of_unstrctrd : Unstrctrd.t -> (signed t, [> `Msg of string ]) result
 val with_canonicalization : 'a t -> canonicalization * canonicalization -> 'a t
+val with_signature_and_hash : _ t -> 'signed -> 'signed t
 
 type domain_key
 
@@ -125,8 +125,15 @@ module Verify : sig
 end
 
 module Encoder : sig
-  val dkim_signature : signed t Prettym.t
-  val as_field : signed t Prettym.t
+  val algorithm : (algorithm * hash_algorithm) Prettym.t
+  val domain : [ `raw ] Domain_name.t Prettym.t
+  val selector : [ `raw ] Domain_name.t Prettym.t
+  val timestamp : int64 Prettym.t
+  val expiration : int64 Prettym.t
+  val length : int Prettym.t
+  val signature : string Prettym.t
+  val dkim_signature : (string * hash_value) t Prettym.t
+  val as_field : (string * hash_value) t Prettym.t
 end
 
 module Sign : sig
