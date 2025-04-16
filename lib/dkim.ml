@@ -446,10 +446,10 @@ module Digest = struct
 
   type 'k t = Digest : { m : ('k, 'ctx) impl; ctx : 'ctx } -> 'k t
   and ('k, 'ctx) impl = (module Digestif.S with type t = 'k and type ctx = 'ctx)
-  and 'k value = signed dkim * domain_key * 'k t
-  and pack = Value : 'k value -> pack
+  and ('signed, 'k) value = 'signed dkim * 'k t
+  and pack = Value : (signed, 'k) value -> pack
 
-  let digest_fields others (field_name, raw, dkim, dk) =
+  let digest_fields others (field_name, raw, dkim, _dk) =
     let (Hash_algorithm a) = snd dkim.a in
     let module Hash = (val Digestif.module_of a) in
     let feed_string ctx str = Hash.feed_string ctx str in
@@ -466,10 +466,10 @@ module Digest = struct
     let fields = Hash.get ctx in
     let fields = Hash.to_raw_string fields in
     let digest = Digest { m = (module Hash); ctx = Hash.empty } in
-    (fields, Value (dkim, dk, digest))
+    (fields, Value (dkim, digest))
 
-  let digest_wsp : type k. _ -> k value -> k value =
-   fun payloads (dkim, dk, Digest { m; ctx }) ->
+  let digest_wsp : type signed k. _ -> (signed, k) value -> (signed, k) value =
+   fun payloads (dkim, Digest { m; ctx }) ->
     let module Hash = (val m) in
     let relaxed =
       match snd dkim.c with
@@ -485,21 +485,25 @@ module Digest = struct
           let ctx = if not relaxed then Hash.feed_string ctx x else ctx in
           go ctx r in
     let ctx = go ctx payloads in
-    (dkim, dk, Digest { m; ctx })
+    (dkim, Digest { m; ctx })
 
-  let digest_str : type k. _ -> k value -> k value =
-   fun x (dkim, dk, Digest { m; ctx }) ->
+  let digest_str : type signed k. _ -> (signed, k) value -> (signed, k) value =
+   fun x (dkim, Digest { m; ctx }) ->
     let module Hash = (val m) in
     let ctx = Hash.feed_string ctx x in
-    (dkim, dk, Digest { m; ctx })
+    (dkim, Digest { m; ctx })
 
   let hashp : type a. a Digestif.hash -> Digestif.hash' -> bool =
    fun a b ->
     let a = Digestif.hash_to_hash' a in
     a = b
 
-  let verify : type k. fields:string -> k value -> string * bool =
-   fun ~fields (dkim, dk, Digest { m = (module Hash); ctx }) ->
+  let verify : type k.
+      fields:string ->
+      domain_key:domain_key ->
+      (signed, k) value ->
+      string * bool =
+   fun ~fields ~domain_key:dk (dkim, Digest { m = (module Hash); ctx }) ->
     let signature, _ = dkim.bbh in
     let (Hash_algorithm a) = snd dkim.a in
     let hashp = hashp a in
@@ -543,7 +547,7 @@ module Verify = struct
     prelude : string;
   }
 
-  and ctx = Ctx : string * 'k Digest.value -> ctx
+  and ctx = Ctx : string * domain_key * (signed, 'k) Digest.value -> ctx
   and fields = (Mrmime.Field_name.t * Unstrctrd.t) list
 
   and dkim =
@@ -609,8 +613,8 @@ module Verify = struct
     Domain_name.append dkim.s x
 
   let signatures ctxs =
-    let fn (Ctx (fields, ((dkim, dk, _) as value))) =
-      let body, fields = Digest.verify ~fields value in
+    let fn (Ctx (fields, dk, ((dkim, _) as value))) =
+      let body, fields = Digest.verify ~fields ~domain_key:dk value in
       Signature { dkim; domain_key = dk; fields; body } in
     List.map fn ctxs
 
@@ -660,10 +664,10 @@ module Verify = struct
     match raw.dkims with
     | [] ->
         let prelude = Bytes.unsafe_of_string raw.prelude in
-        let fn (Dkim (fn, unstrctrd, dkim, dk)) =
+        let fn (Dkim (fn, unstrctrd, (dkim : signed t), dk)) =
           let fields, Value value =
             Digest.digest_fields raw.fields (fn, unstrctrd, dkim, dk) in
-          Ctx (fields, value) in
+          Ctx (fields, dk, value) in
         let ctxs = List.map fn dkims in
         let decoder = Body.decoder () in
         if Bytes.length prelude > 0
@@ -682,11 +686,11 @@ module Verify = struct
       match Body.decode decoder with
       | (`Spaces _ | `CRLF) as x -> go (x :: stack) results
       | `Data x ->
-          let fn (Ctx (fields, value)) =
-            Ctx (fields, Digest.digest_wsp (List.rev stack) value) in
+          let fn (Ctx (fields, dk, value)) =
+            Ctx (fields, dk, Digest.digest_wsp (List.rev stack) value) in
           let results = List.map fn results in
-          let fn (Ctx (fields, value)) =
-            Ctx (fields, Digest.digest_str x value) in
+          let fn (Ctx (fields, dk, value)) =
+            Ctx (fields, dk, Digest.digest_str x value) in
           let results = List.map fn results in
           go [] results
       | `Await ->
@@ -695,8 +699,8 @@ module Verify = struct
           let input_pos = t.input_pos + rem in
           `Await { t with state; input_pos }
       | `End ->
-          let fn (Ctx (fields, value)) =
-            Ctx (fields, Digest.digest_wsp [ `CRLF ] value) in
+          let fn (Ctx (fields, dk, value)) =
+            Ctx (fields, dk, Digest.digest_wsp [ `CRLF ] value) in
           let results = List.map fn results in
           let signatures = signatures results in
           `Signatures signatures in
@@ -889,16 +893,8 @@ module Sign = struct
       }
         -> state
 
-  and 'k digest =
-    | Digest : {
-        k : 'k Digestif.hash;
-        m : ('k, 'ctx) impl;
-        ctx : 'ctx;
-      }
-        -> 'k digest
-
+  and 'k digest = (unsigned, 'k) Digest.value
   and fields = (Mrmime.Field_name.t * Unstrctrd.t) list
-  and ('k, 'ctx) impl = (module Digestif.S with type t = 'k and type ctx = 'ctx)
 
   and action =
     [ `Await of signer | `Malformed of string | `Signature of signed t ]
@@ -922,31 +918,6 @@ module Sign = struct
     | Sign { decoder = v; _ } ->
         Body.src v input idx len ;
         if len == 0 then end_of_input decoder else decoder
-
-  let digest_wsp : type k. _ -> dkim:_ t -> k digest -> k digest =
-   fun payloads ~dkim (Digest { k; m; ctx }) ->
-    let module Hash = (val m) in
-    let relaxed =
-      match snd dkim.c with
-      | Value.Simple -> false
-      | Value.Relaxed -> true
-      | _ -> assert false in
-    let rec go ctx = function
-      | [] -> ctx
-      | [ `Spaces str ] ->
-          if relaxed then Hash.feed_string ctx " " else Hash.feed_string ctx str
-      | `CRLF :: r -> go (Hash.feed_string ctx "\r\n") r
-      | `Spaces x :: r ->
-          let ctx = if not relaxed then Hash.feed_string ctx x else ctx in
-          go ctx r in
-    let ctx = go ctx payloads in
-    Digest { k; m; ctx }
-
-  let digest_str : type k. string -> k digest -> k digest =
-   fun x (Digest { k; m; ctx }) ->
-    let module Hash = (val m) in
-    let ctx = Hash.feed_string ctx x in
-    Digest { k; m; ctx }
 
   let rec fields t decoder fields =
     let open Mrmime in
@@ -974,8 +945,10 @@ module Sign = struct
             | None -> (ctx, fields) in
           let ctx, _ =
             List.fold_left fn (Hash.empty, List.rev fields) t.dkim.h in
-          let fields = Digest { k; m = (module Hash); ctx } in
-          let body = Digest { k; m = (module Hash); ctx = Hash.empty } in
+          let fields = Digest.Digest { m = (module Hash); ctx } in
+          let fields = (t.dkim, fields) in
+          let body = Digest.Digest { m = (module Hash); ctx = Hash.empty } in
+          let body = (t.dkim, body) in
           let decoder = Body.decoder () in
           let prelude = Bytes.unsafe_of_string prelude in
           if Bytes.length prelude > 0
@@ -1002,8 +975,8 @@ module Sign = struct
       match Body.decode decoder with
       | (`Spaces _ | `CRLF) as x -> go (x :: stack) body
       | `Data x ->
-          let body = digest_wsp ~dkim:t.dkim (List.rev stack) body in
-          let body = digest_str x body in
+          let body = Digest.digest_wsp (List.rev stack) body in
+          let body = Digest.digest_str x body in
           go [] body
       | `Await ->
           (* let body = digest_wsp ~dkim:t.dkim stack body in *)
@@ -1012,8 +985,9 @@ module Sign = struct
           let input_pos = t.input_pos + rem in
           `Await { t with state; input_pos }
       | `End ->
-          let body = digest_wsp ~dkim:t.dkim [ `CRLF ] body in
-          let (Digest { k; m = (module Hash); ctx }) = body in
+          let body = Digest.digest_wsp [ `CRLF ] body in
+          let _, Digest { m = (module Hash); ctx } = body in
+          let (Hash_algorithm k) = snd t.dkim.a in
           let bh =
             Hash_value
               (k, Digestif.of_raw_string k Hash.(to_raw_string (get ctx))) in
@@ -1023,7 +997,7 @@ module Sign = struct
             Angstrom.parse_string ~consume:All dkim_field_and_value fake in
           let unstrctrd = Result.get_ok unstrctrd in
           let canon = Canon.of_dkim_fields in
-          let (Digest { k; m = (module Hash); ctx }) = fields in
+          let _, Digest { m = (module Hash); ctx } = fields in
           let feed_string str ctx = Hash.feed_string str ctx in
           let ctx =
             canon t.dkim field_dkim_signature unstrctrd feed_string ctx in
