@@ -1,4 +1,4 @@
-type algorithm = [ `RSA | `Ed25519 ]
+type algorithm = [ `RSA | `ED25519 ]
 type hash = [ `SHA1 | `SHA256 ]
 type canonicalization = [ `Simple | `Relaxed ]
 type query = [ `DNS of [ `TXT ] ]
@@ -10,8 +10,8 @@ and signed = private string * hash_value
 and unsigned
 
 type key =
-  [ `Rsa of Mirage_crypto_pk.Rsa.priv
-  | `Ed25519 of Mirage_crypto_ec.Ed25519.priv ]
+  [ `RSA of Mirage_crypto_pk.Rsa.priv
+  | `ED25519 of Mirage_crypto_ec.Ed25519.priv ]
 
 val v :
   ?version:int ->

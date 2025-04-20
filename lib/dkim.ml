@@ -101,22 +101,22 @@ type domain_key = {
 }
 
 type hash = [ `SHA1 | `SHA256 ]
-type algorithm = [ `RSA | `Ed25519 ]
+type algorithm = [ `RSA | `ED25519 ]
 type canonicalization = [ `Simple | `Relaxed ]
 type query = [ `DNS of [ `TXT ] ]
 
 type key =
-  [ `Rsa of Mirage_crypto_pk.Rsa.priv
-  | `Ed25519 of Mirage_crypto_ec.Ed25519.priv ]
+  [ `RSA of Mirage_crypto_pk.Rsa.priv
+  | `ED25519 of Mirage_crypto_ec.Ed25519.priv ]
 
 let domain_key_of_dkim : key:key -> 'a t -> domain_key =
  fun ~key dkim ->
   let p =
     match (fst dkim.a, key) with
-    | Value.RSA, `Rsa key ->
+    | Value.RSA, `RSA key ->
         let pub = Mirage_crypto_pk.Rsa.pub_of_priv key in
         X509.Public_key.encode_der (`RSA pub)
-    | Value.ED25519, `Ed25519 key ->
+    | Value.ED25519, `ED25519 key ->
         let pub = Mirage_crypto_ec.Ed25519.pub_of_priv key in
         X509.Public_key.encode_der (`ED25519 pub)
     | _ -> failwith "Dkim.domain_key_of_dkim: invalid type of key" in
@@ -306,7 +306,7 @@ let signature_and_hash { bbh; _ } = bbh
 let algorithm ({ a; _ } : _ t) =
   match fst a with
   | Value.RSA -> `RSA
-  | Value.ED25519 -> `Ed25519
+  | Value.ED25519 -> `ED25519
   | Value.Algorithm_ext v -> Fmt.failwith "Unsupported algorithm: %s" v
 
 let domain_name : 'a t -> ([ `raw ] Domain_name.t, [> `Msg of string ]) result =
@@ -856,7 +856,7 @@ module Encoder = struct
   let algorithm ppf (alg, hash) =
     match alg with
     | `RSA -> algorithm ppf (Value.RSA, hash)
-    | `Ed25519 -> algorithm ppf (Value.ED25519, hash)
+    | `ED25519 -> algorithm ppf (Value.ED25519, hash)
 
   let as_field ppf dkim =
     eval ppf
@@ -1010,11 +1010,11 @@ module Sign = struct
             canon t.dkim field_dkim_signature unstrctrd feed_string ctx in
           let b =
             match t.key with
-            | `Rsa key ->
+            | `RSA key ->
                 let hash = Digestif.hash_to_hash' k in
                 let msg = `Digest Hash.(to_raw_string (get ctx)) in
                 Mirage_crypto_pk.Rsa.PKCS1.sign ~hash ~key msg
-            | `Ed25519 key ->
+            | `ED25519 key ->
                 let msg = Hash.(to_raw_string (get ctx)) in
                 Mirage_crypto_ec.Ed25519.sign ~key msg in
           `Signature { t.dkim with bbh = (b, bh) } in
@@ -1029,7 +1029,7 @@ module Sign = struct
   let signer ~key dkim =
     let () =
       match (key, fst dkim.a) with
-      | `Rsa _, Value.RSA | `Ed25519 _, Value.ED25519 -> ()
+      | `RSA _, Value.RSA | `ED25519 _, Value.ED25519 -> ()
       | _ -> failwith "Signer.signer: invalid algorithm" in
     let input, input_pos, input_len = (Bytes.empty, 1, 0) in
     let dec = Mrmime.Hd.decoder p in
@@ -1048,8 +1048,8 @@ let v ?(version = 1) ?(fields = [ Mrmime.Field_name.from ]) ~selector
     match (algorithm, hash) with
     | `RSA, `SHA1 -> (Value.RSA, Hash_algorithm Digestif.SHA1)
     | `RSA, `SHA256 -> (Value.RSA, Hash_algorithm Digestif.SHA256)
-    | `Ed25519, `SHA1 -> (Value.ED25519, Hash_algorithm Digestif.SHA1)
-    | `Ed25519, `SHA256 -> (Value.ED25519, Hash_algorithm Digestif.SHA256) in
+    | `ED25519, `SHA1 -> (Value.ED25519, Hash_algorithm Digestif.SHA1)
+    | `ED25519, `SHA256 -> (Value.ED25519, Hash_algorithm Digestif.SHA256) in
   let c =
     match canonicalization with
     | `Relaxed, `Relaxed -> (Value.Relaxed, Value.Relaxed)
