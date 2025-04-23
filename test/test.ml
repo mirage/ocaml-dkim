@@ -177,7 +177,7 @@ let test_sign (_trust, filename) =
         let str = String.concat "\r\n" str in
         let signer = Dkim.Sign.fill signer str 0 (String.length str) in
         go signer in
-  let key = `Rsa priv_of_seed in
+  let key = `RSA priv_of_seed in
   let dkim = go (Dkim.Sign.signer ~key dkim) in
   Logs.debug (fun m -> m "email signed!") ;
   let oc = open_out (filename ^ ".signed") in

@@ -16,7 +16,7 @@ let seq_of_in_channel ic =
       Lwt.return Lwt_seq.(Cons (str, go)) in
   go
 
-let run src dst newline private_key seed selector hash canon domain_name =
+let run src dst newline private_key seed dkim =
   match (private_key, seed) with
   | None, None ->
       Lwt.return (`Error (true, "A private key or a seed is required"))
@@ -29,7 +29,6 @@ let run src dst newline private_key seed selector hash canon domain_name =
         | None, Some (`Seed seed) -> priv_of_seed seed
         | _ -> assert false
         (* see below *) in
-      let dkim = Dkim.v ~selector ?hash ?canonicalization:canon domain_name in
       let* seq, finally =
         match src with
         | `Input ->
@@ -40,7 +39,7 @@ let run src dst newline private_key seed selector hash canon domain_name =
               Lwt_io.open_file ~mode:Lwt_io.input (Fpath.to_string path) in
             let finally () = Lwt_io.close ic in
             Lwt.return (seq_of_in_channel ic, finally) in
-      let* dkim = Dkim_lwt_unix.sign ~newline ~key:(`Rsa key) dkim seq in
+      let* dkim = Dkim_lwt_unix.sign ~newline ~key:(`RSA key) dkim seq in
       match dkim with
       | Error (`Msg msg) -> finally () >>= fun () -> failwith msg
       | Ok dkim -> begin
@@ -61,9 +60,8 @@ let run src dst newline private_key seed selector hash canon domain_name =
         end
     end
 
-let run _ src dst newline private_key seed selector hash canon domain_name =
-  Lwt_main.run
-    (run src dst newline private_key seed selector hash canon domain_name)
+let run _ src dst newline private_key seed dkim =
+  Lwt_main.run (run src dst newline private_key seed dkim)
 
 let contents_of_path path =
   let ic = open_in (Fpath.to_string path) in
@@ -159,6 +157,9 @@ let canon =
     | `Relaxed, `Simple -> Fmt.string ppf "relaxed/simple" in
   Arg.conv (parser, pp)
 
+let setup_dkim selector hash canon domain_name =
+  Dkim.v ~selector ?hash ?canonicalization:canon domain_name
+
 let seed =
   let parser str =
     match Base64.decode ~pad:true str with
@@ -236,6 +237,10 @@ let hostname =
     & opt (some domain_name) None
     & info [ "h"; "hostname" ] ~doc ~docv:"<hostname>")
 
+let setup_dkim =
+  let open Term in
+  const setup_dkim $ selector $ hash $ canon $ hostname
+
 let common_options = "COMMON OPTIONS"
 
 let verbosity =
@@ -277,10 +282,7 @@ let term =
     $ newline
     $ private_key
     $ seed
-    $ selector
-    $ hash
-    $ canon
-    $ hostname)
+    $ setup_dkim)
 
 let sign =
   let doc =
