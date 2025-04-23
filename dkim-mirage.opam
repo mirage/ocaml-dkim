@@ -29,3 +29,4 @@ depends: [
   "logs"              {with-test}
   "mirage-crypto-rng" {with-test & >= "1.0.0"}
 ]
+x-maintenance-intent: [ "(latest)" ]

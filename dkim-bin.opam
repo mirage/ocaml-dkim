@@ -29,3 +29,4 @@ depends: [
   "dkim-lwt-unix"     {= version}
   "alcotest"          {with-test}
 ]
+x-maintenance-intent: [ "(latest)" ]

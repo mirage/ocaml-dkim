@@ -38,3 +38,4 @@ depends: [
   "mirage-crypto-rng" {with-test & >= "1.2.0"}
   "alcotest"          {with-test}
 ]
+x-maintenance-intent: [ "(latest)" ]
