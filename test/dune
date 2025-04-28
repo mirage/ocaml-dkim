@@ -15,6 +15,7 @@
 
 (rule
  (alias runtest)
+ (package dkim)
  (deps
   (:body body.exe))
  (action
@@ -22,6 +23,7 @@
 
 (rule
  (alias runtest)
+ (package dkim)
  (deps
   (:dkim_field dkim_field.exe))
  (action
@@ -29,6 +31,7 @@
 
 (rule
  (alias runtest)
+ (package dkim)
  (deps
   (:test test.exe)
   (glob_files raw/*.mail))
