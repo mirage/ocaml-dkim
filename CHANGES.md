@@ -1,3 +1,15 @@
+### v0.8.0 2025-04-28 - Paris (France)
+
+- Fix unknown tag (@dinosaure, #46)
+- Remove the high-kinded polymorphism (@dinosaure, #47)
+- Expose useful functions (@dinosaure, #48, #53, #55)
+- Fix generated signature (@dinosaure, #49)
+- Export the `Decoder` module (@dinosaure, #50)
+- Lint dependencies for the mirage-layer (@hannesm, #51)
+- Factorize the way we digest things (@dinosaure, #54)
+- Be compatible with `X509.Public_key.t` (@dinosaure, #56)
+- Add `x-maintenance-intent` (@dinosaure, #52)
+
 ### v0.7.0 2024-09-18 - Paris (France)
 
 - Remove `mirage-random` and upgrade to `tls.1.0.0` (@hannesm, @dinosaure, #44)
