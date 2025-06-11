@@ -99,9 +99,7 @@ module Verify : sig
   type decoder
   type response = [ `Expired | `Domain_key of domain_key | `DNS_error of string ]
 
-  val domain_key :
-    signed t -> ([ `raw ] Domain_name.t, [> `Msg of string ]) result
-
+  val domain_key : 'a t -> ([ `raw ] Domain_name.t, [> `Msg of string ]) result
   val response : decoder -> dkim:signed t -> response:response -> decoder
   val decoder : unit -> decoder
   val src : decoder -> string -> int -> int -> decoder
