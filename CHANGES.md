@@ -1,3 +1,7 @@
+### v0.9.0 2025-11-27 - Paris (France)
+
+- Relax the error result type of `Dkim.domain_key` (@dinosaure, #58)
+
 ### v0.8.0 2025-04-28 - Paris (France)
 
 - Fix unknown tag (@dinosaure, #46)
