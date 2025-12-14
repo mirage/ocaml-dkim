@@ -63,10 +63,12 @@ let mails =
     (2, "raw/005.mail");
   ]
 
+let now () = Unix.gettimeofday ()
+
 let expire dkim =
   match Dkim.expire dkim with
   | None -> false
-  | Some ts -> Int64.of_float (Unix.gettimeofday ()) > ts
+  | Some ts -> Int64.of_float (now ()) > ts
 
 let gettxtrrecord extra domain_name =
   match Domain_name.to_strings domain_name with
@@ -136,15 +138,15 @@ let verify dns ic =
   let valided = go (Dkim.Verify.decoder ()) in
   (valided, !expired, !errored)
 
-let test_verify (_trust, filename) =
+let test_verify (trust, filename) =
   Alcotest.test_case filename `Quick @@ fun () ->
   let ic = open_in filename in
   let finally () = close_in ic in
   Fun.protect ~finally @@ fun () ->
   let valided, expired, errored = verify [] ic in
-  Alcotest.(check int) "errored" (List.length errored) 0 ;
-  Fmt.pr "%d valid dkim signature(s)\n%!" (List.length valided) ;
-  Fmt.pr "%d expired dkim signature(s)\n%!" (List.length expired)
+  Alcotest.(check int) "errored" 0 (List.length errored) ;
+  Alcotest.(check int) "expired" 0 (List.length expired) ;
+  Alcotest.(check int) "valided" trust (List.length valided)
 
 let copy oc ic =
   let buf = Bytes.create 0x7ff in
@@ -157,7 +159,7 @@ let copy oc ic =
     end in
   go ()
 
-let test_sign (_trust, filename) =
+let test_sign i (trust, filename) =
   Alcotest.test_case filename `Quick @@ fun () ->
   let ic = open_in filename in
   let finally () = close_in ic in
@@ -165,7 +167,11 @@ let test_sign (_trust, filename) =
   let buf = Bytes.create 0x7ff in
   let x25519 = Domain_name.of_string_exn "x25519.net" in
   let selector = Domain_name.of_string_exn "admin" in
-  let dkim = Dkim.v ~selector x25519 in
+  let sign_expired = i mod 2 == 0 in
+  let sign_time = if sign_expired then now () -. (48. *. 3600.) else now () in
+  let timestamp = sign_time |> Int64.of_float in
+  let expiration = sign_time +. (24. *. 3600.) |> Int64.of_float in
+  let dkim = Dkim.v ~selector ~timestamp ~expiration x25519 in
   let rec go signer =
     match Dkim.Sign.sign signer with
     | `Malformed err -> failwith err
@@ -195,13 +201,14 @@ let test_sign (_trust, filename) =
   Fun.protect ~finally @@ fun () ->
   Logs.debug (fun m -> m "verify signed email.") ;
   let valided, expired, errored = verify [ (domain_name, domain_key) ] ic in
-  Alcotest.(check bool) "valided" (List.length valided >= 1) true ;
-  Alcotest.(check int) "errored" (List.length errored) 0 ;
-  Fmt.pr "%d valid dkim signature(s)\n%!" (List.length valided) ;
-  Fmt.pr "%d expired dkim signature(s)\n%!" (List.length expired)
+  let expected_valided = if sign_expired then trust else trust + 1 in
+  let expected_expired = if sign_expired then 1 else 0 in
+  Alcotest.(check int) "errored" 0 (List.length errored) ;
+  Alcotest.(check int) "expired" expected_expired (List.length expired) ;
+  Alcotest.(check int) "valided" expected_valided (List.length valided)
 
 let () =
   Alcotest.run "ocaml-dkim"
     [
-      ("verify", List.map test_verify mails); ("sign", List.map test_sign mails);
+      ("verify", List.map test_verify mails); ("sign", List.mapi test_sign mails);
     ]
