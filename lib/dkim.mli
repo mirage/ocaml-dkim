@@ -28,6 +28,7 @@ val v :
   unsigned t
 
 val fields : 'a t -> Mrmime.Field_name.t list
+val timestamp : 'a t -> int64 option
 val expire : 'a t -> int64 option
 val body : signed t -> string
 val domain : 'a t -> [ `raw ] Domain_name.t

@@ -278,7 +278,8 @@ let post_process_dkim hmap =
   (* TODO(dinosaure): b, bh *)
   { v; a; c; d; h; i; l; q; s; t; x; z; bbh = (b, bh) }
 
-let expire ({ t; _ } : _ t) = t
+let timestamp ({ t; _ } : _ t) = t
+let expire ({ x; _ } : _ t) = x
 
 let canonicalization ({ c; _ } : _ t) =
   let to_c = function
