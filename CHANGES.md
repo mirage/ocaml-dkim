@@ -1,3 +1,7 @@
+### v0.10.0 2026-02-04 Paris (France)
+
+- Use DKIM-Signature Header field x= for expiration (@BChabanne, @hannesm, @dinosaure, #61)
+
 ### v0.9.0 2025-11-27 - Paris (France)
 
 - Relax the error result type of `Dkim.domain_key` (@dinosaure, #58)
