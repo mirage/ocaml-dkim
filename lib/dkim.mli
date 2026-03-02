@@ -40,8 +40,12 @@ val signature_and_hash : 'signed t -> 'signed
 val algorithm : 'a t -> algorithm
 val of_string : string -> (signed t, [> `Msg of string ]) result
 val of_unstrctrd : Unstrctrd.t -> (signed t, [> `Msg of string ]) result
+
+(**/*)
+
 val with_canonicalization : 'a t -> canonicalization * canonicalization -> 'a t
 val with_signature_and_hash : _ t -> 'signed -> 'signed t
+val with_selector : 'a t -> selector:[ `raw ] Domain_name.t -> 'a t
 
 type domain_key
 

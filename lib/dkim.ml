@@ -294,6 +294,7 @@ let with_canonicalization t (a, b) =
   { t with c = (of_c a, of_c b) }
 
 let with_signature_and_hash t bbh = { t with bbh }
+let with_selector (t : _ t) ~selector:s = { t with s }
 
 let body : signed t -> string =
  fun { bbh = _, Hash_value (m, hash); _ } -> Digestif.to_raw_string m hash
