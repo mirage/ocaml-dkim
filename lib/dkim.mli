@@ -46,6 +46,7 @@ val of_unstrctrd : Unstrctrd.t -> (signed t, [> `Msg of string ]) result
 val with_canonicalization : 'a t -> canonicalization * canonicalization -> 'a t
 val with_signature_and_hash : _ t -> 'signed -> 'signed t
 val with_selector : 'a t -> selector:[ `raw ] Domain_name.t -> 'a t
+val with_expiration : 'a t -> int64 option -> 'a t
 
 type domain_key
 
