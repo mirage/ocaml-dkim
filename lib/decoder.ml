@@ -128,6 +128,7 @@ let hyphenated_word =
 *)
 let hdr_name = field_name1
 let rsa = string "rsa" *> return Value.RSA
+let ed25519 = string "ed25519" *> return Value.ED25519
 let sha1 = string "sha1" *> return Value.SHA1
 let sha256 = string "sha256" *> return Value.SHA256
 let simple = string "simple" *> return Value.Simple
@@ -229,7 +230,7 @@ let v =
 let a =
   let tag_name = string "a" >>| fun _ -> Map.K.a in
   let tag_value =
-    rsa <|> algorithm_extension <* char '-' >>= fun k ->
+    rsa <|> ed25519 <|> algorithm_extension <* char '-' >>= fun k ->
     sha1 <|> sha256 <|> hash_extension >>| fun h -> (k, h) in
   tag_spec ~tag_name ~tag_value >>| binding
 
@@ -409,7 +410,7 @@ let h =
 
 let k =
   let tag_name = string "k" >>| fun _ -> Map.K.k in
-  let tag_value = rsa <|> algorithm_extension in
+  let tag_value = rsa <|> ed25519 <|> algorithm_extension in
   tag_spec ~tag_name ~tag_value >>| binding
 
 let n =
