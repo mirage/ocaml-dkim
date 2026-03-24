@@ -17,6 +17,7 @@ module Hash = struct
 end
 
 let error_msgf fmt = Fmt.kstr (fun msg -> Error (`Msg msg)) fmt
+let msgf fmt = Fmt.kstr (fun msg -> `Msg msg) fmt
 let invalid_argf = Fmt.invalid_arg
 let failwith_error_msg = function Ok v -> v | Error (`Msg err) -> failwith err
 
@@ -118,7 +119,7 @@ let domain_key_of_dkim : key:key -> 'a t -> domain_key =
         X509.Public_key.encode_der (`RSA pub)
     | Value.ED25519, `ED25519 key ->
         let pub = Mirage_crypto_ec.Ed25519.pub_of_priv key in
-        X509.Public_key.encode_der (`ED25519 pub)
+        Mirage_crypto_ec.Ed25519.pub_to_octets pub
     | _ -> failwith "Dkim.domain_key_of_dkim: invalid type of key" in
   let k, h = dkim.a in
   { v = "DKIM1"; h = [ h ]; n = None; k; p; s = [ Value.All ]; t = [] }
@@ -515,11 +516,20 @@ module Digest = struct
     let body = Hash.get ctx in
     let body = Hash.to_raw_string body in
     let fields =
-      match (X509.Public_key.decode_der dk.p, fst dkim.a) with
-      | Ok (`RSA key), Value.RSA ->
+      let key = match fst dkim.a with
+        | Value.RSA -> X509.Public_key.decode_der dk.p
+        | Value.ED25519 ->
+            let ( let* ) = Result.bind in
+            let* k =
+              Mirage_crypto_ec.Ed25519.pub_of_octets dk.p
+              |> Result.map_error (fun _ -> msgf "Invalid ED25519 public-key") in
+            Ok (`ED25519 k)
+        | _ -> failwith "Unexpected public-key type" in
+      match key with
+      | Ok (`RSA key) ->
           Mirage_crypto_pk.Rsa.PKCS1.verify ~hashp ~key ~signature
             (`Digest fields)
-      | Ok (`ED25519 key), Value.ED25519 ->
+      | Ok (`ED25519 key) ->
           Mirage_crypto_ec.Ed25519.verify ~key signature ~msg:fields
       | _ -> false in
     (body, fields)
