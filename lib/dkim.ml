@@ -158,12 +158,14 @@ let domain_key_to_string domain_key =
   let buf = Buffer.create 0x7f in
   let ppf = Format.formatter_of_buffer buf in
   let rec go ppf = function
-    | [] -> Format.fprintf ppf "%!"
-    | [ (k, v) ] -> Format.fprintf ppf "%s=%s;" k v
+    | [] -> ()
+    | [ (k, v) ] ->
+        Format.fprintf ppf "%s=%s;" k v
     | (k, v) :: r ->
         Format.fprintf ppf "%s=%s; " k v ;
         go ppf r in
   go ppf lst ;
+  Format.fprintf ppf "%!";
   Buffer.contents buf
 
 let pp : type a. a t Fmt.t =
