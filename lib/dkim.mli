@@ -448,8 +448,8 @@ module Decoder = Decoder
     authentication mechanisms (SPF, DMARC, ARC). *)
 
 type map
-(** An heterogeneous map holding the parsed tag-value pairs of a
-    DKIM-Signature header field. *)
+(** An heterogeneous map holding the parsed tag-value pairs of a DKIM-Signature
+    header field. *)
 
 val field_dkim_signature : Mrmime.Field_name.t
 (** The [DKIM-Signature] field name as a {!Mrmime.Field_name.t} value. *)

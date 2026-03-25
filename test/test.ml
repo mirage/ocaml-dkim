@@ -94,21 +94,20 @@ let response_of_dns_request errored ~dkim dns =
   | Error (`Msg _msg) ->
       errored := `Invalid_domain_name dkim :: !errored ;
       `DNS_error "Invalid domain-name to retrive domain key"
-  | Ok domain_name -> begin
-      match gettxtrrecord dns domain_name with
+  | Ok domain_name ->
+      begin match gettxtrrecord dns domain_name with
       | Ok txts ->
           let txts = String.concat "" txts in
-          begin
-            match Dkim.domain_key_of_string txts with
-            | Ok domain_key -> `Domain_key domain_key
-            | Error (`Msg _msg) ->
-                errored := `Invalid_domain_key txts :: !errored ;
-                `DNS_error "Invalid domain key"
+          begin match Dkim.domain_key_of_string txts with
+          | Ok domain_key -> `Domain_key domain_key
+          | Error (`Msg _msg) ->
+              errored := `Invalid_domain_key txts :: !errored ;
+              `DNS_error "Invalid domain key"
           end
       | Error err ->
           errored := err :: !errored ;
           `DNS_error "DNS error"
-    end
+      end
 
 let verify dns ic =
   let errored = ref [] in
