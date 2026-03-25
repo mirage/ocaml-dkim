@@ -396,11 +396,11 @@ module Encoder : sig
   val signature : string Prettym.t
   (** Formats a base64-encoded signature for the [b=] tag. *)
 
-  val dkim_signature : (string * hash_value) t Prettym.t
+  val dkim_signature : ?with_version:bool -> (string * hash_value) t Prettym.t
   (** Formats the tag-value list of a signed DKIM record (everything after the
       colon in a DKIM-Signature field). *)
 
-  val as_field : (string * hash_value) t Prettym.t
+  val as_field : ?with_version:bool -> (string * hash_value) t Prettym.t
   (** Formats a complete DKIM-Signature header field, including the field name,
       colon, properly folded tag-value list, and trailing newline. *)
 end
