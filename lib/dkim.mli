@@ -192,9 +192,10 @@ val domain_key_of_dkim : key:key -> _ t -> domain_key
     and a DKIM value. The resulting value is what you would publish in DNS so
     that verifiers can check signatures produced with [key]. *)
 
-val domain_key_to_string : domain_key -> string
-(** [domain_key_to_string dk] serializes a domain key into the tag-value format
-    expected in a DNS TXT record. *)
+val domain_key_to_string : ?with_version:bool -> domain_key -> string
+(** [domain_key_to_string ?with_version dk] serializes a domain key into the
+    tag-value format expected in a DNS TXT record. [with_version] writes the
+    domain-key version (by default) to [v=DKIM1]. *)
 
 val equal_domain_key : domain_key -> domain_key -> bool
 (** [equal_domain_key a b] is [true] if [a] and [b] carry the same public key

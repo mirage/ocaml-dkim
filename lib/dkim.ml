@@ -124,7 +124,7 @@ let domain_key_of_dkim : key:key -> 'a t -> domain_key =
   let k, h = dkim.a in
   { v = "DKIM1"; h = [ h ]; n = None; k; p; s = [ Value.All ]; t = [] }
 
-let domain_key_to_string domain_key =
+let domain_key_to_string ?(with_version = true) domain_key =
   let k_to_string = function
     | Value.RSA -> "rsa"
     | Value.ED25519 -> "ed25519"
@@ -145,12 +145,11 @@ let domain_key_to_string domain_key =
           Buffer.add_char buf ':' ;
           go r in
     go lst in
+  let lst = if with_version then [ ("v", domain_key.v) ] else [] in
   let lst =
-    [
-      ("v", domain_key.v);
-      ("p", Base64.encode_exn ~pad:true domain_key.p);
-      ("k", k_to_string domain_key.k);
-    ] in
+    ("p", Base64.encode_exn ~pad:true domain_key.p)
+    :: ("k", k_to_string domain_key.k)
+    :: lst in
   let lst =
     match domain_key.h with [] -> lst | h -> ("h", h_to_string h) :: lst in
   let lst =
