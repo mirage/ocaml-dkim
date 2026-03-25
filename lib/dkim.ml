@@ -1059,6 +1059,13 @@ let v ?(version = 1) ?(fields = [ Mrmime.Field_name.from ]) ~selector
   if version <> 1 then Fmt.invalid_arg "Invalid version number: %d" version ;
   if List.length fields = 0
   then Fmt.invalid_arg "Require at last one field to sign an email" ;
+  let fields =
+    let fn field_name =
+      let open Mrmime in
+      let is_dkim_signature = Field_name.equal field_name (Field_name.v "DKIM-Signature") in
+      if is_dkim_signature then Log.warn (fun m -> m "Remove DKIM-Signature from fields to sign (this is prohibited according to the standard)");
+      not is_dkim_signature in
+    List.filter fn fields in
   let a =
     match (algorithm, hash) with
     | `RSA, `SHA1 -> (Value.RSA, Hash_algorithm Digestif.SHA1)
