@@ -159,13 +159,12 @@ let domain_key_to_string domain_key =
   let ppf = Format.formatter_of_buffer buf in
   let rec go ppf = function
     | [] -> ()
-    | [ (k, v) ] ->
-        Format.fprintf ppf "%s=%s;" k v
+    | [ (k, v) ] -> Format.fprintf ppf "%s=%s;" k v
     | (k, v) :: r ->
         Format.fprintf ppf "%s=%s; " k v ;
         go ppf r in
   go ppf lst ;
-  Format.fprintf ppf "%!";
+  Format.fprintf ppf "%!" ;
   Buffer.contents buf
 
 let pp : type a. a t Fmt.t =
@@ -518,13 +517,15 @@ module Digest = struct
     let body = Hash.get ctx in
     let body = Hash.to_raw_string body in
     let fields =
-      let key = match fst dkim.a with
+      let key =
+        match fst dkim.a with
         | Value.RSA -> X509.Public_key.decode_der dk.p
         | Value.ED25519 ->
             let ( let* ) = Result.bind in
             let* k =
               Mirage_crypto_ec.Ed25519.pub_of_octets dk.p
-              |> Result.map_error (fun _ -> msgf "Invalid ED25519 public-key") in
+              |> Result.map_error (fun _ -> msgf "Invalid ED25519 public-key")
+            in
             Ok (`ED25519 k)
         | _ -> failwith "Unexpected public-key type" in
       match key with
@@ -1061,8 +1062,14 @@ let v ?(version = 1) ?(fields = [ Mrmime.Field_name.from ]) ~selector
   let fields =
     let fn field_name =
       let open Mrmime in
-      let is_dkim_signature = Field_name.equal field_name (Field_name.v "DKIM-Signature") in
-      if is_dkim_signature then Log.warn (fun m -> m "Remove DKIM-Signature from fields to sign (this is prohibited according to the standard)");
+      let is_dkim_signature =
+        Field_name.equal field_name (Field_name.v "DKIM-Signature") in
+      if is_dkim_signature
+      then
+        Log.warn (fun m ->
+            m
+              "Remove DKIM-Signature from fields to sign (this is prohibited \
+               according to the standard)") ;
       not is_dkim_signature in
     List.filter fn fields in
   let a =

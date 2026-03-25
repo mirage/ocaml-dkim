@@ -14,10 +14,9 @@ module Make (D : Dns_client_mirage.S) = struct
             let txts =
               List.map (String.concat "" % String.split_on_char ' ') txts in
             let txts = String.concat "" txts in
-            begin
-              match Dkim.domain_key_of_string txts with
-              | Ok domain_key -> `Domain_key domain_key
-              | Error (`Msg msg) -> `DNS_error msg
+            begin match Dkim.domain_key_of_string txts with
+            | Ok domain_key -> `Domain_key domain_key
+            | Error (`Msg msg) -> `DNS_error msg
             end
         | Error (`Msg msg) -> `DNS_error msg)
 
