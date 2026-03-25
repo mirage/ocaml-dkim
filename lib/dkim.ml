@@ -1001,7 +1001,6 @@ module Sign = struct
           let body = Digest.digest_str x body in
           go [] body
       | `Await ->
-          (* let body = digest_wsp ~dkim:t.dkim stack body in *)
           let state = Sign { decoder; fields; stack; body } in
           let rem = src_rem t in
           let input_pos = t.input_pos + rem in
