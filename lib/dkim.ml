@@ -740,12 +740,9 @@ module Encoder = struct
       [ box; !!string; cut; char $ '='; !!pvalue; cut; char $ ';'; close ]
       key value
 
-  let version ?(with_version = true) ppf v =
-    if with_version
-    then
-      let int ppf v = eval ppf [ !!string ] (string_of_int v) in
-      tag int ppf ("v", v)
-    else ppf
+  let version ppf v =
+    let int ppf v = eval ppf [ !!string ] (string_of_int v) in
+    tag int ppf ("v", v)
 
   let fields ppf lst =
     let sep = ((fun ppf () -> eval ppf [ cut; char $ ':'; cut ]), ()) in
@@ -846,10 +843,10 @@ module Encoder = struct
 
   let dkim_signature ?(with_version = true) ppf (dkim : signed dkim) =
     let b, bh = dkim.bbh in
+    let v = if with_version then Some dkim.v else None in
     eval ppf
       [
-        !!(version ~with_version);
-        fws;
+        !!(option_with_fws version);
         !!algorithm;
         fws;
         !!canonicalization;
@@ -869,7 +866,7 @@ module Encoder = struct
         !!signature;
         fws;
       ]
-      dkim.v dkim.a dkim.c dkim.d dkim.s dkim.t dkim.x dkim.q dkim.l bh dkim.h b
+      v dkim.a dkim.c dkim.d dkim.s dkim.t dkim.x dkim.q dkim.l bh dkim.h b
 
   let algorithm ppf (alg, hash) =
     match alg with
