@@ -1,3 +1,12 @@
+### v0.11.0 2026-04-20 Paris (France)
+
+- Add `with_selector` (@dinosaure, #63)
+- Handle correctly `ed25519` algorithm (@dinosaure, #64)
+- Lint and warn when the user tries to sign DKIM-Signature (@dinosaure, #65)
+- Apply `ocamlformat.0.29.0` (@dinosaure, #67)
+- Be able to not write v=DKIM1 when we encode a domain-key (for ARC) (@dinosaure, #68)
+- Be able to not write DKIM version on our DKIM-Signature (@dinosaure, #69, #70)
+
 ### v0.10.0 2026-02-04 Paris (France)
 
 - Use DKIM-Signature Header field x= for expiration (@BChabanne, @hannesm, @dinosaure, #61)
